@@ -4,7 +4,7 @@ Stickman wave-defense in schriftstijl. Eén HTML-bestand, geen dependencies. Ope
 
 ## Features
 - Eindeloze golven (baas elke 5 golven), vijanden komen uit wisselende portalen
-- Goud rapen, op bouwvakken staan om te betalen
+- Goud rapen, op bouwvakken staan om te betalen (alleen tussen golven, tijdens een golf is de winkel dicht)
 - 9 gebieden ontgrendelen, elk met eigen gebouwen: geschut, kanon, mortier, teslaspoel, goudmijn, kazerne (bondgenoten), hospitaal
 - Alle gebouwen en wapens eindeloos te upgraden, kapotte gebouwen herstellen
 - 6 wapens (pistool, shotgun, SMG, doorborende lans, raket, kettingbliksem), automatisch richten
