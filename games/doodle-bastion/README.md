@@ -8,7 +8,7 @@ Stickman wave-defense in schriftstijl. Eén HTML-bestand, geen dependencies. Ope
 - 9 gebieden ontgrendelen, elk met eigen gebouwen: geschut, kanon, mortier, teslaspoel, goudmijn, kazerne (bondgenoten), hospitaal
 - Alle gebouwen en wapens eindeloos te upgraden, kapotte gebouwen herstellen
 - 6 wapens (pistool, shotgun, SMG, doorborende lans, raket, kettingbliksem), automatisch richten
-- 2 spelers op één toestel, touch-joystick voor mobiel
+- 2 spelers op één toestel: toetsenbord, of touchscreen (P1 linkerhelft, P2 rechterhelft)
 - Automatisch opslaan na elke golf, record
 
 ## Besturing
