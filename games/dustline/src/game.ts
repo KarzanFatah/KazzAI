@@ -111,11 +111,13 @@ export class Game {
       onCheckpoint: (i, t) => {
         this.hud.toast(`CHECKPOINT ${i}/${this.track.checkpoints.length - 1} · ${formatTime(t)}`);
         this.audio.checkpoint();
+        this.fx.sparkles(this.car.position, 30);
       },
       onLap: (lap, t, best) => {
         this.hud.center(`LAP ${lap + 1}`, 1.2, "small");
         this.hud.toast(`LAP ${lap} · ${formatTime(t)}${best ? " · BEST!" : ""}`, 2.4);
         this.audio.lap();
+        this.fx.sparkles(this.car.position, 60);
       },
       onFinish: (total) => {
         this.audio.finish();
