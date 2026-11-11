@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { AudioSystem } from "./audio";
 import { ChaseCamera } from "./camera";
+import { Environment } from "./environment";
 import { Car, type DriveInput } from "./car";
 import { Effects, TireTracks } from "./fx";
 import { Hud } from "./hud";
@@ -11,6 +12,8 @@ import { Sea } from "./sea";
 import { Terrain } from "./terrain";
 import { TouchControls } from "./touch";
 import { Track, type NearestResult } from "./track";
+import type { Collider } from "./types";
+import { buildVillage } from "./village";
 
 const IDLE_INPUT: DriveInput = {
   throttle: 0,
@@ -45,7 +48,10 @@ export class Game {
   readonly hud: Hud;
   readonly audio = new AudioSystem();
 
-  private readonly sun: THREE.DirectionalLight;
+  readonly env: Environment;
+  readonly village: PropsResult;
+  /** Everything the car can bump into. */
+  readonly colliders: Collider[];
   private readonly near: NearestResult = { index: 0, distance: 0, lateral: 0 };
   private raf = 0;
   private last = 0;
@@ -67,31 +73,15 @@ export class Game {
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
-    const haze = new THREE.Color(0xe8cf9f);
-    this.scene.background = haze;
-    this.scene.fog = new THREE.Fog(haze, 140, 430);
-
-    this.scene.add(new THREE.HemisphereLight(0xfff3dc, 0xa07a4a, 0.7));
-    // Low warm sun for long shadows.
-    const sun = new THREE.DirectionalLight(0xffe3b5, 3.3);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const sc = sun.shadow.camera;
-    sc.left = -60;
-    sc.right = 60;
-    sc.top = 60;
-    sc.bottom = -60;
-    sc.near = 10;
-    sc.far = 320;
-    sun.shadow.bias = -0.0006;
-    sun.shadow.normalBias = 0.04;
-    this.scene.add(sun, sun.target);
-    this.sun = sun;
+    this.env = new Environment(this.scene, renderer);
 
     this.terrain = new Terrain(this.track);
+    this.props = buildProps(this.scene, this.terrain, this.track);
+    // The village levels its building pads, so the terrain mesh is built after it.
+    this.village = buildVillage(this.scene, this.terrain, this.track, this.props.colliders);
+    this.colliders = [...this.props.colliders, ...this.village.colliders];
     this.scene.add(this.terrain.buildMesh());
     this.sea = new Sea(this.scene, this.terrain);
-    this.props = buildProps(this.scene, this.terrain, this.track);
     this.fx = new Effects(this.scene, this.terrain);
     this.tracks = new TireTracks(this.scene, this.terrain, 4);
 
@@ -105,11 +95,9 @@ export class Game {
         this.fx.impact(p, s);
         this.audio.impact(s);
         this.cam.shake(s * 0.8);
-        if (c.id !== undefined) this.props.hit(c.id, s);
+        this.hitProp(c, s);
       },
-      onSoftHit: (c, s) => {
-        if (c.id !== undefined) this.props.hit(c.id, s);
-      },
+      onSoftHit: (c, s) => this.hitProp(c, s),
       onJump: () => this.audio.jump(),
       onBoostStart: () => this.audio.boost(),
     });
@@ -222,17 +210,18 @@ export class Game {
     if (input.resetPressed) this.backToTrack();
 
     const drive = race.state === "racing" ? input.drive : IDLE_INPUT;
-    car.update(dt, drive, this.props.colliders);
+    car.update(dt, drive, this.colliders);
     if (car.drowning > 1.3) this.backToTrack();
     race.update(dt, car);
 
     this.props.update(dt, this.time, car.position);
+    this.village.update(dt, this.time, car.position);
     this.emitWheelEffects(dt);
     this.fx.update(dt, this.cam.camera);
     this.tracks.update(dt);
     this.sea.update(this.time);
     this.cam.update(dt, car);
-    this.followSun();
+    this.env.update(car.position);
 
     car.audio.throttle = race.state === "countdown" ? input.drive.throttle : car.audio.throttle;
     this.audio.update(dt, car.audio);
@@ -278,14 +267,11 @@ export class Game {
     }
   }
 
-  private followSun(): void {
-    // Keep the shadow frustum centred on the car, snapped to shadow texels to avoid shimmer.
-    const p = this.car.position;
-    const texel = 120 / 2048;
-    const x = Math.round(p.x / texel) * texel;
-    const z = Math.round(p.z / texel) * texel;
-    this.sun.target.position.set(x, p.y, z);
-    this.sun.position.set(x + 100, p.y + 58, z - 95);
+  /** Route a collision to whichever prop set owns the collider. */
+  private hitProp(c: Collider, strength: number): void {
+    if (c.id === undefined) return;
+    if (this.props.colliders.includes(c)) this.props.hit(c.id, strength);
+    else this.village.hit(c.id, strength);
   }
 
   /** Pause rendering and sound while the tab/app is in the background. */

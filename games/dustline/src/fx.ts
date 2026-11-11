@@ -356,7 +356,7 @@ export class Effects {
   private readonly debrisCols = [0x5b4632, 0x3f342a, 0x6e5c44].map((c) => new THREE.Color(c));
   private readonly sprayCols = [0xffffff, 0xd8f7f1, 0x9fe5da].map((c) => new THREE.Color(c));
   private readonly foamCol = new THREE.Color(0xf2faf6);
-  private readonly smokeCol = new THREE.Color(0x4f463d);
+  private readonly smokeCol = new THREE.Color(0x7a6d5e);
   private readonly flameCore = new THREE.Color(0x4f9dff);
   private readonly flameA = new THREE.Color(0xff8a2a);
   private readonly flameB = new THREE.Color(0xffc45c);

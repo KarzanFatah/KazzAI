@@ -120,6 +120,28 @@ export class Terrain {
     }
   }
 
+  /**
+   * Level a building pad: inside `radius` the ground becomes `height`, blending back to the
+   * natural ground over `blend` metres. Call before buildMesh(). Leaves the road untouched.
+   */
+  flatten(x: number, z: number, radius: number, height: number, blend = 6): void {
+    const { res, cell } = this;
+    const r = radius + blend;
+    const i0 = Math.max(0, Math.floor((x - r + HALF_WORLD) / cell));
+    const i1 = Math.min(res - 1, Math.ceil((x + r + HALF_WORLD) / cell));
+    const j0 = Math.max(0, Math.floor((z - r + HALF_WORLD) / cell));
+    const j1 = Math.min(res - 1, Math.ceil((z + r + HALF_WORLD) / cell));
+    for (let j = j0; j <= j1; j++) {
+      for (let i = i0; i <= i1; i++) {
+        const idx = j * res + i;
+        if (this.roadMask[idx] > 0.05) continue;
+        const d = Math.hypot(-HALF_WORLD + i * cell - x, -HALF_WORLD + j * cell - z);
+        const w = 1 - smoothstep(radius, r, d);
+        this.heights[idx] = lerp(this.heights[idx], height, w);
+      }
+    }
+  }
+
   private sampleGrid(arr: Float32Array, x: number, z: number): number {
     const res = this.res;
     const gx = clamp((x + HALF_WORLD) / this.cell, 0, res - 1.001);
