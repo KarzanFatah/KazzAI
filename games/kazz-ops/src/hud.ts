@@ -122,10 +122,12 @@ class Crosshair {
 
   constructor(parent: HTMLElement) {
     this.root = el("div", "xh", parent);
-    for (const side of ["t", "b", "l", "r"]) el("div", `xh-tick xh-${side}`, this.root);
+    for (const side of ["t", "b", "l", "r"])
+      el("div", `xh-tick xh-${side}`, this.root);
     el("div", "xh-dot", this.root);
     this.hit = el("div", "xh-hit", this.root);
-    for (const side of ["t", "b", "l", "r"]) el("div", `xh-tick xh-${side}`, this.hit);
+    for (const side of ["t", "b", "l", "r"])
+      el("div", `xh-tick xh-${side}`, this.hit);
   }
 
   moveTo(x: number, y: number): void {
@@ -386,9 +388,15 @@ export class Hud {
     this.ammoStatus.set(status);
 
     const box = this.ammoBox.classList;
-    box.toggle("is-low", weapons.ammo <= Math.ceil(w.magSize * LOW_AMMO_FRACTION));
+    box.toggle(
+      "is-low",
+      weapons.ammo <= Math.ceil(w.magSize * LOW_AMMO_FRACTION),
+    );
     box.toggle("is-empty", empty);
-    this.ammoStatus.node.classList.toggle("is-warn", !weapons.reloading && empty);
+    this.ammoStatus.node.classList.toggle(
+      "is-warn",
+      !weapons.reloading && empty,
+    );
     this.root.classList.toggle("hud--reloading", weapons.reloading);
     this.reloadBar.set(weapons.reloading ? weapons.reloadProgress : 0);
   }
@@ -428,8 +436,10 @@ export class Hud {
     this.barrels.setNumber(stats.barrelsExploded);
     this.fps.setNumber(stats.fps);
 
-    if (stats.targetsDropped > this.lastTargets) this.targetsHot = STAT_HOT_TIME;
-    if (stats.barrelsExploded > this.lastBarrels) this.barrelsHot = STAT_HOT_TIME;
+    if (stats.targetsDropped > this.lastTargets)
+      this.targetsHot = STAT_HOT_TIME;
+    if (stats.barrelsExploded > this.lastBarrels)
+      this.barrelsHot = STAT_HOT_TIME;
     this.lastTargets = stats.targetsDropped;
     this.lastBarrels = stats.barrelsExploded;
     this.targetsHot = this.tickHot(this.targets.node, this.targetsHot, dt);

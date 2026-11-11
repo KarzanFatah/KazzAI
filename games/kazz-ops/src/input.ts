@@ -197,8 +197,10 @@ export class Input {
   update(dt: number): void {
     this.updateMove();
 
-    this.fireHeld = (this.mouseButtons & MOUSE_LEFT) !== 0 || this.virtualHeld.fire;
-    this.aimHeld = (this.mouseButtons & MOUSE_RIGHT) !== 0 || this.virtualHeld.aim;
+    this.fireHeld =
+      (this.mouseButtons & MOUSE_LEFT) !== 0 || this.virtualHeld.fire;
+    this.aimHeld =
+      (this.mouseButtons & MOUSE_RIGHT) !== 0 || this.virtualHeld.aim;
     this.runHeld =
       this.heldKeys.has("ShiftLeft") ||
       this.heldKeys.has("ShiftRight") ||
@@ -337,7 +339,8 @@ export class Input {
   };
 
   private readonly onKeyUp = (e: KeyboardEvent): void => {
-    if (this.heldKeys.delete(e.code) && e.code in MOVE_KEYS) this.updateKeyMove();
+    if (this.heldKeys.delete(e.code) && e.code in MOVE_KEYS)
+      this.updateKeyMove();
   };
 
   private readonly onBlur = (): void => {
@@ -381,7 +384,8 @@ export class Input {
 
   /** A second mouse button pressed while another is held arrives as a pointermove. */
   private readonly onCanvasPointerMove = (e: PointerEvent): void => {
-    if (e.pointerType !== "touch" && e.button !== -1) this.applyButtons(e.buttons);
+    if (e.pointerType !== "touch" && e.button !== -1)
+      this.applyButtons(e.buttons);
   };
 
   private readonly onCanvasPointerUp = (e: PointerEvent): void => {

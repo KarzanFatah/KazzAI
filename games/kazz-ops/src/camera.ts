@@ -264,7 +264,8 @@ export class CameraRig {
     const cam = this.camera;
     const sinY = Math.sin(this.yaw);
     const cosY = Math.cos(this.yaw);
-    const lead = this.lead * this.distance;
+    // Portrait screens already show plenty of floor ahead, so lead less there.
+    const lead = this.lead * this.distance * Math.min(1, this.camera.aspect);
 
     _focus.set(
       this.follow.x + this.look.x - sinY * lead,

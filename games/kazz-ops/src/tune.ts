@@ -1,9 +1,4 @@
-import {
-  TUNE_PARAMS,
-  resetTuning,
-  saveTuning,
-  type TuneParam,
-} from "./config";
+import { TUNE_PARAMS, resetTuning, saveTuning, type TuneParam } from "./config";
 import type { GameContext } from "./types";
 
 const SAVE_DELAY_MS = 400;
@@ -62,7 +57,12 @@ export class TunePanel {
     this.buildGroups(body);
 
     const footer = make("footer", "tune-footer", root);
-    const reset = make("button", "tune-btn tune-btn--ghost", footer, "Reset defaults");
+    const reset = make(
+      "button",
+      "tune-btn tune-btn--ghost",
+      footer,
+      "Reset defaults",
+    );
     reset.type = "button";
     reset.addEventListener("click", this.onReset);
     const close = make("button", "tune-btn", footer, "Close");
@@ -113,7 +113,8 @@ export class TunePanel {
 
   /** Re-read every value from ctx.tuning (after a reset or external change). */
   refresh(): void {
-    for (const row of this.rows) this.showValue(row, this.ctx.tuning[row.param.key]);
+    for (const row of this.rows)
+      this.showValue(row, this.ctx.tuning[row.param.key]);
   }
 
   private buildGroups(body: HTMLElement): void {
@@ -128,7 +129,11 @@ export class TunePanel {
     }
   }
 
-  private buildGroup(body: HTMLElement, name: string, open: boolean): HTMLElement {
+  private buildGroup(
+    body: HTMLElement,
+    name: string,
+    open: boolean,
+  ): HTMLElement {
     const section = make("section", "tune-group", body);
     section.classList.toggle("is-open", open);
     const head = make("button", "tune-group-head", section, name);
@@ -160,7 +165,12 @@ export class TunePanel {
       input.step = String(param.step);
       label.appendChild(input);
     }
-    const row: ParamRow = { param, input, readout, decimals: decimalsFor(param.step) };
+    const row: ParamRow = {
+      param,
+      input,
+      readout,
+      decimals: decimalsFor(param.step),
+    };
     input.addEventListener("input", () => this.onEdit(row));
     input.addEventListener("change", () => this.onEdit(row));
     // Drop focus after a drag so WASD drives the soldier again instead of the slider.
@@ -192,7 +202,10 @@ export class TunePanel {
     const { min, max } = row.param;
     const fill = ((value - min) / (max - min)) * 100;
     row.readout.textContent = value.toFixed(row.decimals);
-    row.input.style.setProperty("--fill", `${Math.min(100, Math.max(0, fill))}%`);
+    row.input.style.setProperty(
+      "--fill",
+      `${Math.min(100, Math.max(0, fill))}%`,
+    );
   }
 
   private scheduleSave(): void {

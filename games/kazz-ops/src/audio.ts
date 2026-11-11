@@ -656,7 +656,7 @@ const IMPACTS: Record<Surface, ImpactRecipe> = {
     },
   },
   fabric: {
-    gain: 0.28,
+    gain: 0.42,
     range: 30,
     send: 0.15,
     pitchVar: 0.1,
@@ -667,7 +667,7 @@ const IMPACTS: Record<Surface, ImpactRecipe> = {
     },
   },
   ground: {
-    gain: 0.9,
+    gain: 0.55,
     range: 35,
     send: 0.15,
     pitchVar: 0.1,
@@ -760,7 +760,7 @@ export class Sfx {
   }
 
   dryFire(): void {
-    const v = this.engine.voice(null, { gain: 0.5 });
+    const v = this.engine.voice(null, { gain: 0.7 });
     if (!v) return;
     const { white } = this.engine.noise;
     v.noise(white, { dur: 0.018, gain: 1.4, filter: "bandpass", freq: 4200, q: 6 });
@@ -880,7 +880,7 @@ export class Sfx {
 
   /** Cloth whoosh + hand slap, then the landing thud after `duration`. */
   vault(pos: Vec3, duration: number): void {
-    const v = this.engine.voice(pos, { gain: 0.25, range: 30, send: 0.1 });
+    const v = this.engine.voice(pos, { gain: 0.3, range: 30, send: 0.1 });
     if (!v) return;
     const { white, pink, crackle } = this.engine.noise;
     v.noise(pink, {
@@ -910,7 +910,7 @@ export class Sfx {
   /** Drop thud + a descending scrape that lasts about as long as the slide. */
   slide(pos: Vec3, duration: number): void {
     const d = clamp(duration * 0.9, 0.3, 1.2);
-    const v = this.engine.voice(pos, { gain: 0.26, range: 30, send: 0.1 });
+    const v = this.engine.voice(pos, { gain: 0.17, range: 30, send: 0.1 });
     if (!v) return;
     const { pink, brown, crackle } = this.engine.noise;
     v.tone({ dur: 0.09, gain: 0.3, freq: 110, freqTo: 60 });
@@ -1153,7 +1153,7 @@ export class Sfx {
 
   /** Ka-chunk. */
   private pump(delay: number): void {
-    const v = this.engine.voice(null, { gain: 0.58, delay, priority: 2 });
+    const v = this.engine.voice(null, { gain: 0.36, delay, priority: 2 });
     if (!v) return;
     const { white } = this.engine.noise;
     v.noise(white, { dur: 0.07, gain: 1.8, filter: "bandpass", freq: 1400, q: 1.5 });

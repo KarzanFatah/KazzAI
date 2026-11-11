@@ -16,7 +16,8 @@ const EDGE_MARGIN = 6;
 const ICONS = {
   reload:
     '<path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4.5H15"/>',
-  crouch: '<path d="M12 4v10"/><path d="M7.5 9.5 12 14l4.5-4.5"/><path d="M5 19.5h14"/>',
+  crouch:
+    '<path d="M12 4v10"/><path d="M7.5 9.5 12 14l4.5-4.5"/><path d="M5 19.5h14"/>',
   vault:
     '<path d="M8 20v-4.5h8V20"/><path d="M4.5 13C6 6.5 18 6.5 19.5 13"/><path d="m19.5 13-3.3-1M19.5 13l.9-3.3"/>',
   sprint: '<path d="m6 12.5 6-6 6 6"/><path d="m6 18.5 6-6 6 6"/>',
