@@ -7,6 +7,7 @@
  *   node scripts/smoke.cjs                  # starts its own vite dev server
  *   node scripts/smoke.cjs --url http://localhost:5173/
  *   node scripts/smoke.cjs --mobile-only    # only the phone (touch) pass
+ *   SMOKE_PORT=5201 SMOKE_OUT=/tmp/out node scripts/smoke.cjs   # parallel-safe
  */
 const { chromium, devices } = require("playwright");
 const { spawn } = require("child_process");
@@ -14,7 +15,7 @@ const path = require("path");
 const fs = require("fs");
 
 const ROOT = path.join(__dirname, "..");
-const OUT = path.join(ROOT, "test-output");
+const OUT = process.env.SMOKE_OUT || path.join(ROOT, "test-output");
 const argv = process.argv.slice(2);
 const urlArg = argv.includes("--url") ? argv[argv.indexOf("--url") + 1] : null;
 const mobileOnly = argv.includes("--mobile-only");
