@@ -40,7 +40,10 @@ export function seededRandom(seed: number): Rand {
 const textures = new Map<string, THREE.Texture>();
 const materials = new Map<string, THREE.Material>();
 
-function cachedTexture(key: string, create: () => THREE.Texture): THREE.Texture {
+function cachedTexture(
+  key: string,
+  create: () => THREE.Texture,
+): THREE.Texture {
   let tex = textures.get(key);
   if (!tex) {
     tex = create();
@@ -49,7 +52,10 @@ function cachedTexture(key: string, create: () => THREE.Texture): THREE.Texture 
   return tex;
 }
 
-function cachedMaterial<T extends THREE.Material>(key: string, create: () => T): T {
+function cachedMaterial<T extends THREE.Material>(
+  key: string,
+  create: () => T,
+): T {
   let mat = materials.get(key);
   if (!mat) {
     mat = create();
@@ -59,7 +65,12 @@ function cachedMaterial<T extends THREE.Material>(key: string, create: () => T):
 }
 
 /** Canvas texture that tiles (RepeatWrapping on both axes). */
-function tiling(width: number, height: number, draw: Draw, anisotropy = 8): THREE.CanvasTexture {
+function tiling(
+  width: number,
+  height: number,
+  draw: Draw,
+  anisotropy = 8,
+): THREE.CanvasTexture {
   const tex = makeCanvasTexture(width, height, draw);
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
@@ -72,7 +83,13 @@ function tiling(width: number, height: number, draw: Draw, anisotropy = 8): THRE
 // ---------------------------------------------------------------------------------------------
 
 /** Monochrome per-pixel grain. */
-function addNoise(g: CanvasRenderingContext2D, w: number, h: number, amount: number, rand: Rand): void {
+function addNoise(
+  g: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  amount: number,
+  rand: Rand,
+): void {
   const img = g.getImageData(0, 0, w, h);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
@@ -175,7 +192,8 @@ function rustPatch(
   blob(g, rand, x, y, r, "#9c5a2b", 0.72, w, h, squashY);
   blob(g, rand, x + r * 0.15, y, r * 0.55, "#b8692f", 0.55, w, h, squashY);
   blob(g, rand, x - r * 0.1, y, r * 0.45, "#5e2f17", 0.6, w, h, squashY);
-  speckles(g, rand, x, y, r * 1.7, Math.floor(r * 2.2), ["#a9622c", "#5a2b14", "#7b4220"], w, h);
+  const flakes = ["#a9622c", "#5a2b14", "#7b4220"];
+  speckles(g, rand, x, y, r * 1.7, Math.floor(r * 2.2), flakes, w, h);
 }
 
 function withCircleClip(
@@ -222,7 +240,12 @@ function hazardStripes(
 }
 
 /** White diamond with a black flame: the flammable warning label. */
-function flammableLabel(g: CanvasRenderingContext2D, cx: number, cy: number, size: number): void {
+function flammableLabel(
+  g: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+): void {
   const s = size / 2;
   g.save();
   g.translate(cx, cy);
@@ -268,7 +291,9 @@ export function makeGridTexture(): THREE.Texture {
         g.fillRect(0, 0, w, h);
         // Very soft mottling so the floor doesn't look like flat CG.
         for (let i = 0; i < 40; i++) {
-          blob(g, rand, rand() * w, rand() * h, 60 + rand() * 120, rand() > 0.5 ? "#2b3648" : "#232c3b", 0.18, w, h);
+          const tone = rand() > 0.5 ? "#2b3648" : "#232c3b";
+          const r = 60 + rand() * 120;
+          blob(g, rand, rand() * w, rand() * h, r, tone, 0.18, w, h);
         }
         addNoise(g, w, h, 6, rand);
         const cell = w / GRID_TILE_METRES;
@@ -277,10 +302,12 @@ export function makeGridTexture(): THREE.Texture {
           g.fillRect(pos - width / 2, 0, width, h);
           g.fillRect(0, pos - width / 2, w, width);
         };
-        for (let i = 1; i < GRID_TILE_METRES; i++) line(i * cell, 3, "#2e394c");
+        for (let i = 1; i < GRID_TILE_METRES; i++) {
+          line(i * cell, 3, "#303b4f");
+        }
         // Major line sits on the tile edge: draw both halves so it tiles seamlessly.
-        line(0, 7, "#35425a");
-        line(w, 7, "#35425a");
+        line(0, 7, "#37445c");
+        line(w, 7, "#37445c");
       },
       16,
     ),
@@ -318,6 +345,11 @@ export const BARREL_ATLAS = {
   RIBS: [1 / 3, 2 / 3] as const,
 };
 
+/** Atlas v of a relative barrel height (0 = bottom rim, 1 = top rim). */
+export function barrelAtlasV(rel: number): number {
+  return BARREL_ATLAS.SIDE_V0 + rel * (1 - BARREL_ATLAS.SIDE_V0);
+}
+
 const ATLAS_SIZE = 512;
 const SIDE_PX = ATLAS_SIZE * (1 - BARREL_ATLAS.SIDE_V0);
 const LID_PX = ATLAS_SIZE * 0.25;
@@ -325,7 +357,11 @@ const LID_PX = ATLAS_SIZE * 0.25;
 /** Canvas y of a relative barrel height (0 bottom .. 1 top) inside the side band. */
 const sideY = (rel: number): number => (1 - rel) * SIDE_PX;
 
-function drawBarrelSide(g: CanvasRenderingContext2D, rand: Rand, variant: BarrelVariant): void {
+function drawBarrelSide(
+  g: CanvasRenderingContext2D,
+  rand: Rand,
+  variant: BarrelVariant,
+): void {
   const paint = BARREL_PAINT[variant];
   const w = ATLAS_SIZE;
   const h = SIDE_PX;
@@ -373,8 +409,10 @@ function drawBarrelSide(g: CanvasRenderingContext2D, rand: Rand, variant: Barrel
   const patches = Math.round(10 + 26 * paint.rust);
   for (let i = 0; i < patches; i++) {
     const nearRim = rand() < 0.55;
-    const y = nearRim ? (rand() < 0.4 ? rand() * 30 : h - rand() * 45) : rand() * h;
-    rustPatch(g, rand, rand() * w, y, 5 + rand() * 18 * (0.5 + paint.rust), w, 0, 0.8);
+    const rimY = rand() < 0.4 ? rand() * 30 : h - rand() * 45;
+    const y = nearRim ? rimY : rand() * h;
+    const r = 5 + rand() * 18 * (0.5 + paint.rust);
+    rustPatch(g, rand, rand() * w, y, r, w, 0, 0.8);
   }
   const drips = Math.round(6 + 18 * paint.rust);
   for (let i = 0; i < drips; i++) {
@@ -409,6 +447,27 @@ function drawBarrelSide(g: CanvasRenderingContext2D, rand: Rand, variant: Barrel
     g.fillRect(x - r, y - r, r * 2, r * 2);
   }
   g.restore();
+}
+
+/** Bung cap on a drum lid: shadow, cap, recessed centre. */
+function bung(
+  g: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+): void {
+  g.fillStyle = "rgba(0,0,0,0.35)";
+  g.beginPath();
+  g.arc(x + 1, y + 1.5, r * 1.15, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#77706a";
+  g.beginPath();
+  g.arc(x, y, r, 0, Math.PI * 2);
+  g.fill();
+  g.fillStyle = "#4b4642";
+  g.beginPath();
+  g.arc(x, y, r * 0.45, 0, Math.PI * 2);
+  g.fill();
 }
 
 function drawBarrelLid(
@@ -455,31 +514,19 @@ function drawBarrelLid(
     g.arc(cx, cy, c * 0.7 + 2, 0, Math.PI * 2);
     g.stroke();
 
-    const patches = Math.round(3 + 9 * paint.rust);
+    // Lids sit in the rain: far rustier than the sides, like the reference drums.
+    const patches = Math.round(4 + 16 * paint.rust);
     for (let i = 0; i < patches; i++) {
       const a = rand() * Math.PI * 2;
-      const d = Math.sqrt(rand()) * c * 0.9;
-      rustPatch(g, rand, cx + Math.cos(a) * d, cy + Math.sin(a) * d, 4 + rand() * 13 * (0.4 + paint.rust), 0, 0);
+      const d = Math.sqrt(rand()) * c * 0.92;
+      const r = 5 + rand() * 16 * (0.4 + paint.rust);
+      rustPatch(g, rand, cx + Math.cos(a) * d, cy + Math.sin(a) * d, r, 0, 0);
     }
 
     if (top) {
-      // Bung caps: a large and a small one, like a real drum.
-      const bung = (bx: number, by: number, r: number): void => {
-        g.fillStyle = "rgba(0,0,0,0.35)";
-        g.beginPath();
-        g.arc(bx + 1, by + 1.5, r * 1.15, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = "#77706a";
-        g.beginPath();
-        g.arc(bx, by, r, 0, Math.PI * 2);
-        g.fill();
-        g.fillStyle = "#4b4642";
-        g.beginPath();
-        g.arc(bx, by, r * 0.45, 0, Math.PI * 2);
-        g.fill();
-      };
-      bung(cx + c * 0.48, cy - c * 0.22, c * 0.13);
-      bung(cx - c * 0.5, cy + c * 0.18, c * 0.08);
+      // A large and a small bung, like a real drum.
+      bung(g, cx + c * 0.48, cy - c * 0.22, c * 0.13);
+      bung(g, cx - c * 0.5, cy + c * 0.18, c * 0.08);
     }
 
     // Dark chime edge.
@@ -511,7 +558,9 @@ export function makeBarrelTexture(variant: BarrelVariant): THREE.Texture {
 }
 
 /** Stand-alone rusty lid (for anything that wants just the top of a drum). */
-export function makeRustyLidTexture(variant: BarrelVariant = "rust"): THREE.Texture {
+export function makeRustyLidTexture(
+  variant: BarrelVariant = "rust",
+): THREE.Texture {
   return cachedTexture(`lid-${variant}`, () =>
     makeCanvasTexture(LID_PX, LID_PX, (g, w, h) => {
       const rand = seededRandom(31);
@@ -522,7 +571,7 @@ export function makeRustyLidTexture(variant: BarrelVariant = "rust"): THREE.Text
 }
 
 // ---------------------------------------------------------------------------------------------
-// Wood, crates, concrete, plastic, fabric
+// Wood, crates, concrete, plastic, fabric, rubber
 // ---------------------------------------------------------------------------------------------
 
 /** Light weathered planks, 1 m per repeat, grain along U. Tint with vertex colours. */
@@ -543,7 +592,8 @@ export function makeWoodTexture(): THREE.Texture {
         for (const off of [0, h, -h]) {
           g.beginPath();
           for (let x = 0; x <= w; x += 8) {
-            const y = y0 + off + Math.sin((x / w) * Math.PI * 2 * periods + phase) * amp;
+            const wave = (x / w) * Math.PI * 2 * periods + phase;
+            const y = y0 + off + Math.sin(wave) * amp;
             if (x === 0) g.moveTo(x, y);
             else g.lineTo(x, y);
           }
@@ -570,8 +620,8 @@ export function makeWoodTexture(): THREE.Texture {
   );
 }
 
-/** Region of the crate texture that is plain frame board (for frame geometry UVs). */
-export const CRATE_FRAME_UV = { u0: 0.02, v0: 0.2, u1: 0.1, v1: 0.8 };
+/** A UV inside the crate texture's plain frame board (solid colour for edge battens). */
+export const CRATE_FRAME_UV = [0.06, 0.5] as const;
 
 /** One crate face (UV 0..1 per face): framed planks with a diagonal brace and nails. */
 export function makeCrateTexture(): THREE.Texture {
@@ -582,7 +632,8 @@ export function makeCrateTexture(): THREE.Texture {
       const ph = h / planks;
       for (let i = 0; i < planks; i++) {
         const l = 0.88 + rand() * 0.16;
-        g.fillStyle = `rgb(${Math.round(186 * l)},${Math.round(142 * l)},${Math.round(92 * l)})`;
+        const [r, gr, b] = [186 * l, 142 * l, 92 * l].map(Math.round);
+        g.fillStyle = `rgb(${r},${gr},${b})`;
         g.fillRect(0, i * ph, w, ph);
         g.strokeStyle = "rgba(110,75,40,0.35)";
         for (let k = 0; k < 7; k++) {
@@ -590,7 +641,9 @@ export function makeCrateTexture(): THREE.Texture {
           g.lineWidth = 0.6 + rand();
           g.beginPath();
           g.moveTo(0, y);
-          g.bezierCurveTo(w * 0.3, y + rand() * 4 - 2, w * 0.7, y + rand() * 4 - 2, w, y);
+          const y1 = y + rand() * 4 - 2;
+          const y2 = y + rand() * 4 - 2;
+          g.bezierCurveTo(w * 0.3, y1, w * 0.7, y2, w, y);
           g.stroke();
         }
         g.fillStyle = "rgba(40,25,12,0.75)";
@@ -631,7 +684,7 @@ export function makeCrateTexture(): THREE.Texture {
       board(frame, 0, w - frame * 2, frame);
       board(frame, h - frame, w - frame * 2, frame);
       g.fillStyle = "#3b3632";
-      for (const [x, y] of [
+      const nails = [
         [15, 15],
         [w - 15, 15],
         [15, h - 15],
@@ -640,7 +693,8 @@ export function makeCrateTexture(): THREE.Texture {
         [w - 15, h / 2],
         [w / 2, 15],
         [w / 2, h - 15],
-      ]) {
+      ];
+      for (const [x, y] of nails) {
         g.beginPath();
         g.arc(x, y, 2.4, 0, Math.PI * 2);
         g.fill();
@@ -658,11 +712,14 @@ export function makeConcreteTexture(): THREE.Texture {
       g.fillStyle = "#d9d5cb";
       g.fillRect(0, 0, w, h);
       for (let i = 0; i < 26; i++) {
-        blob(g, rand, rand() * w, rand() * h, 20 + rand() * 50, rand() > 0.5 ? "#c9c4b8" : "#e6e2d8", 0.25, w, h);
+        const tone = rand() > 0.5 ? "#c9c4b8" : "#e6e2d8";
+        blob(g, rand, rand() * w, rand() * h, 20 + rand() * 50, tone, 0.25, w, h);
       }
       for (let i = 0; i < 6; i++) {
-        blob(g, rand, rand() * w, rand() * h, 8 + rand() * 18, "#a8a296", 0.2, w, h);
+        const r = 8 + rand() * 18;
+        blob(g, rand, rand() * w, rand() * h, r, "#a8a296", 0.2, w, h);
       }
+      // Air pockets.
       for (let i = 0; i < 160; i++) {
         g.fillStyle = `rgba(80,76,70,${0.2 + rand() * 0.4})`;
         const s = 0.8 + rand() * 1.8;
@@ -683,11 +740,14 @@ export function makePlasticTexture(): THREE.Texture {
       g.fillStyle = "#f4f4f4";
       g.fillRect(0, 0, w, h);
       for (let i = 0; i < 30; i++) {
-        g.fillStyle = rand() > 0.5 ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.04)";
+        g.fillStyle =
+          rand() > 0.5 ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.04)";
         g.fillRect(0, rand() * h, w, 1 + rand() * 3);
       }
+      // Scuffs and dirt.
       for (let i = 0; i < 14; i++) {
-        blob(g, rand, rand() * w, rand() * h, 6 + rand() * 22, "#8a8580", 0.08, w, h);
+        const r = 6 + rand() * 22;
+        blob(g, rand, rand() * w, rand() * h, r, "#8a8580", 0.08, w, h);
       }
       g.strokeStyle = "rgba(60,55,50,0.18)";
       for (let i = 0; i < 30; i++) {
@@ -720,7 +780,8 @@ export function makeSandbagTexture(): THREE.Texture {
         g.fillRect(x, 0, 1.5, h);
       }
       for (let i = 0; i < 10; i++) {
-        blob(g, rand, rand() * w, rand() * h, 8 + rand() * 16, "#8c7d62", 0.12, w, h);
+        const r = 8 + rand() * 16;
+        blob(g, rand, rand() * w, rand() * h, r, "#8c7d62", 0.12, w, h);
       }
       addNoise(g, w, h, 20, rand);
     });
@@ -754,7 +815,8 @@ export function makeCamoTexture(): THREE.Texture {
       ];
       for (const [color, count, size] of layers) {
         for (let i = 0; i < count; i++) {
-          blob(g, rand, rand() * w, rand() * h, size * (0.6 + rand() * 0.8), color, 0.95, w, h, 0.7);
+          const r = size * (0.6 + rand() * 0.8);
+          blob(g, rand, rand() * w, rand() * h, r, color, 0.95, w, h, 0.7);
         }
       }
       addNoise(g, w, h, 10, rand);
@@ -779,19 +841,72 @@ export function makeConeTexture(): THREE.Texture {
   );
 }
 
+/**
+ * Tyre rubber for a torus (u around the ring, v around the tube with v = 0 on the tread): tread
+ * blocks along both edges of the canvas, smooth sidewall with a moulded ring in the middle.
+ * One repeat covers 1/TIRE_TREAD_REPEAT of the circumference.
+ */
+export const TIRE_TREAD_REPEAT = 16;
+
+export function makeTireTexture(): THREE.Texture {
+  return cachedTexture("tire", () => {
+    const tex = tiling(64, 128, (g, w, h) => {
+      const rand = seededRandom(121);
+      g.fillStyle = "#2b2d30";
+      g.fillRect(0, 0, w, h);
+      // Moulded sidewall rings.
+      g.fillStyle = "rgba(255,255,255,0.05)";
+      g.fillRect(0, h * 0.3, w, 3);
+      g.fillRect(0, h * 0.68, w, 3);
+      // Tread: v = 0 and v = 1 meet on the outer face, so draw blocks on both edges.
+      const band = h * 0.16;
+      g.fillStyle = "#1b1c1e";
+      for (const y0 of [0, h - band]) {
+        g.fillRect(0, y0, w, band);
+      }
+      g.fillStyle = "#34363a";
+      for (const y0 of [2, h - band + 2]) {
+        g.fillRect(4, y0, w * 0.38, band - 4);
+        g.fillRect(w * 0.55, y0, w * 0.38, band - 4);
+      }
+      addNoise(g, w, h, 10, rand);
+    });
+    tex.repeat.set(TIRE_TREAD_REPEAT, 1);
+    return tex;
+  });
+}
+
 // ---------------------------------------------------------------------------------------------
 // Shared materials
 // ---------------------------------------------------------------------------------------------
 
 export function floorMaterial(): THREE.MeshStandardMaterial {
-  return cachedMaterial("floor", () => new THREE.MeshStandardMaterial({ map: makeGridTexture(), roughness: 0.94, metalness: 0 }));
+  return cachedMaterial(
+    "floor",
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeGridTexture(),
+        roughness: 0.94,
+        metalness: 0,
+      }),
+  );
 }
 
-/** Painted steel drum. All variants share the same atlas layout. */
-export function barrelMaterial(variant: BarrelVariant): THREE.MeshStandardMaterial {
+/**
+ * Painted steel drum. All variants share the same atlas layout. Clone the explosive variant per
+ * barrel if you animate its emissive (fuse flicker); the clone shares the texture.
+ */
+export function barrelMaterial(
+  variant: BarrelVariant,
+): THREE.MeshStandardMaterial {
   return cachedMaterial(
     `barrel-${variant}`,
-    () => new THREE.MeshStandardMaterial({ map: makeBarrelTexture(variant), roughness: 0.62, metalness: 0.22 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeBarrelTexture(variant),
+        roughness: 0.62,
+        metalness: 0.22,
+      }),
   );
 }
 
@@ -799,19 +914,38 @@ export function barrelMaterial(variant: BarrelVariant): THREE.MeshStandardMateri
 export function woodMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "wood",
-    () => new THREE.MeshStandardMaterial({ map: makeWoodTexture(), vertexColors: true, roughness: 0.88 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeWoodTexture(),
+        vertexColors: true,
+        roughness: 0.88,
+      }),
   );
 }
 
+/** Crate faces + vertex-tinted edge battens (see CRATE_FRAME_UV). */
 export function crateMaterial(): THREE.MeshStandardMaterial {
-  return cachedMaterial("crate", () => new THREE.MeshStandardMaterial({ map: makeCrateTexture(), roughness: 0.84 }));
+  return cachedMaterial(
+    "crate",
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeCrateTexture(),
+        vertexColors: true,
+        roughness: 0.84,
+      }),
+  );
 }
 
 /** Concrete with vertex colours (slots and seams are dark vertex-coloured parts). */
 export function concreteMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "concrete",
-    () => new THREE.MeshStandardMaterial({ map: makeConcreteTexture(), vertexColors: true, roughness: 0.95 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeConcreteTexture(),
+        vertexColors: true,
+        roughness: 0.95,
+      }),
   );
 }
 
@@ -819,28 +953,48 @@ export function concreteMaterial(): THREE.MeshStandardMaterial {
 export function plasticMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "plastic",
-    () => new THREE.MeshStandardMaterial({ map: makePlasticTexture(), vertexColors: true, roughness: 0.5 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makePlasticTexture(),
+        vertexColors: true,
+        roughness: 0.5,
+      }),
   );
 }
 
 export function sandbagMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "sandbag",
-    () => new THREE.MeshStandardMaterial({ map: makeSandbagTexture(), vertexColors: true, roughness: 1 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeSandbagTexture(),
+        vertexColors: true,
+        roughness: 1,
+      }),
   );
 }
 
+/** Tyre rubber (expects torus-style UVs, see makeTireTexture). */
 export function rubberMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "rubber",
-    () => new THREE.MeshStandardMaterial({ color: 0x26282b, roughness: 0.9 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeTireTexture(),
+        roughness: 0.92,
+      }),
   );
 }
 
 export function coneMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "cone",
-    () => new THREE.MeshStandardMaterial({ map: makeConeTexture(), vertexColors: true, roughness: 0.55 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        map: makeConeTexture(),
+        vertexColors: true,
+        roughness: 0.55,
+      }),
   );
 }
 
@@ -848,14 +1002,24 @@ export function coneMaterial(): THREE.MeshStandardMaterial {
 export function steelMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "steel",
-    () => new THREE.MeshStandardMaterial({ color: 0x40454d, roughness: 0.5, metalness: 0.55 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: 0x40454d,
+        roughness: 0.5,
+        metalness: 0.55,
+      }),
   );
 }
 
-/** Painted steel target plate. */
+/** Painted steel target plate. Clone per plate to flash its emissive on hits. */
 export function targetPlateMaterial(): THREE.MeshStandardMaterial {
   return cachedMaterial(
     "target-plate",
-    () => new THREE.MeshStandardMaterial({ color: 0xf0e8d2, roughness: 0.42, metalness: 0.2 }),
+    () =>
+      new THREE.MeshStandardMaterial({
+        color: 0xf0e8d2,
+        roughness: 0.42,
+        metalness: 0.2,
+      }),
   );
 }
