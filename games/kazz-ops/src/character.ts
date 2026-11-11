@@ -243,7 +243,7 @@ class PartFactory {
     return this.mesh(parent, geo, mat, x, y, z);
   }
 
-  /** Sphere, or a cap of one when thetaLength < π (measured down from the top). */
+  /** Sphere, or a band of one between polar angles thetaStart..thetaStart+thetaLength. */
   sphere(
     parent: THREE.Object3D,
     mat: THREE.Material,
@@ -252,10 +252,11 @@ class PartFactory {
     y = 0,
     z = 0,
     thetaLength = Math.PI,
+    thetaStart = 0,
   ): THREE.Mesh {
     const geo = this.geometry(
-      `sph${radius},${thetaLength}`,
-      () => new THREE.SphereGeometry(radius, 18, 10, 0, TAU, 0, thetaLength),
+      `sph${radius},${thetaLength},${thetaStart}`,
+      () => new THREE.SphereGeometry(radius, 18, 10, 0, TAU, thetaStart, thetaLength),
     );
     return this.mesh(parent, geo, mat, x, y, z);
   }
@@ -364,6 +365,7 @@ function buildTorso(f: PartFactory, m: Materials, hips: THREE.Group, spine: THRE
   // Back: small assault pack and a radio with antenna.
   f.box(chest, m.pack, 0.27, 0.28, 0.09, 0, 0.1, -0.165);
   f.box(chest, m.pouch, 0.2, 0.05, 0.08, 0, 0.255, -0.16);
+  for (const x of [-0.065, 0.065]) f.box(chest, m.pouch, 0.1, 0.12, 0.04, x, 0.07, -0.215);
   f.box(chest, m.pouchDark, 0.07, 0.15, 0.06, 0.14, 0.13, -0.15);
   f.cylinder(chest, m.gear, 0.006, 0.24, 0.155, 0.32, -0.16);
   f.cylinder(chest, m.gear, 0.075, 0.06, 0, 0.295, 0);
@@ -372,6 +374,8 @@ function buildTorso(f: PartFactory, m: Materials, hips: THREE.Group, spine: THRE
 function buildHead(f: PartFactory, m: Materials, head: THREE.Group): void {
   f.cylinder(head, m.gear, 0.055, 0.1, 0, 0.03, 0);
   f.sphere(head, m.skin, 0.1, 0, 0.13, 0.012).scale.set(0.92, 1.05, 1);
+  // Balaclava over the lower face: only a strip of skin shows under the goggles.
+  f.sphere(head, m.gear, 0.104, 0, 0.135, 0.012, Math.PI * 0.34, Math.PI * 0.66).scale.set(0.92, 1.05, 1);
   // Helmet: big light dome with a lip, goggles band and NVG shroud on the front (reads from above).
   f.sphere(head, m.helmet, 0.155, 0, 0.15, -0.005, Math.PI * 0.56).scale.set(1, 0.92, 1.1);
   f.cylinder(head, m.helmetTrim, 0.158, 0.03, 0, 0.14, -0.005, "y", 0.165, 18).scale.z = 1.1;
@@ -1057,7 +1061,7 @@ export class CharacterModel {
     }
     // Vault: support hand reaches down to plant on the obstacle.
     if (this.vaultW > 0.001) {
-      _target.set(0.16, 0.92 - 0.12 * this.vaultTuck, 0.34);
+      _target.set(0.08, 0.86 - 0.1 * this.vaultTuck, 0.42);
       _support.lerp(_target, this.vaultW);
     }
 

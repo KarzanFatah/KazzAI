@@ -381,18 +381,18 @@ class Voice {
   }
 }
 
-/** Allows at most `max` plays per `window` seconds. */
+/** Allows at most `max` plays per `period` seconds. */
 class Throttle {
   private windowStart = -Infinity;
   private count = 0;
 
   constructor(
-    private readonly window: number,
+    private readonly period: number,
     private readonly max: number,
   ) {}
 
   allow(now: number): boolean {
-    if (now - this.windowStart >= this.window) {
+    if (now - this.windowStart >= this.period) {
       this.windowStart = now;
       this.count = 0;
     }
