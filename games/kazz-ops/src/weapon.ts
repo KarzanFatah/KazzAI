@@ -77,10 +77,13 @@ function scatter(
   halfAngle: number,
   uniform: boolean,
 ): THREE.Vector3 {
-  basisU.crossVectors(Math.abs(axis.y) < 0.99 ? WORLD_UP : WORLD_X, axis).normalize();
+  basisU
+    .crossVectors(Math.abs(axis.y) < 0.99 ? WORLD_UP : WORLD_X, axis)
+    .normalize();
   basisV.crossVectors(axis, basisU).normalize();
   // Uniform disc for pellet patterns, centre-weighted for single bullets.
-  const r = Math.tan(halfAngle) * (uniform ? Math.sqrt(Math.random()) : Math.random());
+  const r =
+    Math.tan(halfAngle) * (uniform ? Math.sqrt(Math.random()) : Math.random());
   const a = Math.random() * Math.PI * 2;
   return out
     .copy(axis)
@@ -115,6 +118,8 @@ export class WeaponSystem {
   private state = this.ammoStates[0];
   /** Seconds until the next round may fire; negative remainders carry over while firing. */
   private cooldown = 0;
+  /** True while rounds keep coming back to back (the cooldown remainder is valid credit). */
+  private firingStreak = false;
   private fireBuffer = 0;
   private switchTimer = 0;
   private dryFireTimer = 0;
@@ -150,7 +155,8 @@ export class WeaponSystem {
     const { input, tuning } = this.ctx;
     if (tuning.infiniteAmmo >= 0.5) this.refillReserves();
 
-    if (input.weaponSlotPressed !== null) this.switchTo(input.weaponSlotPressed);
+    if (input.weaponSlotPressed !== null)
+      this.switchTo(input.weaponSlotPressed);
     else if (input.weaponCycle !== 0) this.cycle(Math.sign(input.weaponCycle));
 
     this.tickTimers(dt);
@@ -202,6 +208,7 @@ export class WeaponSystem {
     this.current = weapon;
     this.state = this.ammoStates[WEAPONS.indexOf(weapon)];
     this.cooldown = 0;
+    this.firingStreak = false;
     this.fireBuffer = 0;
     this.pumpTimer = 0;
     this.emptyTimer = 0;
@@ -251,7 +258,8 @@ export class WeaponSystem {
     const base = w.spreadHip + (w.spreadAim - w.spreadHip) * this.aimBlend;
     const speed = Math.hypot(player.velocity.x, player.velocity.z);
     const move =
-      w.spreadMoveAdd * Math.min(speed / Math.max(0.1, tuning.runSpeed), MAX_MOVE_SPREAD);
+      w.spreadMoveAdd *
+      Math.min(speed / Math.max(0.1, tuning.runSpeed), MAX_MOVE_SPREAD);
     const crouch = 1 + (w.crouchMul - 1) * this.crouchBlend;
     return (base + move + this.bloom) * crouch * tuning.spreadMul;
   }
@@ -267,17 +275,22 @@ export class WeaponSystem {
     const w = this.current;
     if (input.firePressed) {
       // A press during sprint-to-fire still lands once the weapon comes up.
-      this.fireBuffer = FIRE_BUFFER + (player.canFire() ? 0 : tuning.sprintToFireDelay);
+      this.fireBuffer =
+        FIRE_BUFFER + (player.canFire() ? 0 : tuning.sprintToFireDelay);
     }
     const wants = this.fireBuffer > 0 || (w.auto && input.fireHeld);
     const fired = wants && this.tryFire(w);
-    // The accumulator only carries a negative remainder across consecutive firing frames.
-    if (!fired && this.cooldown < 0) this.cooldown = 0;
+    // A ready weapon that did not fire ends the streak: idle time never becomes burst credit.
+    if (!fired && this.cooldown <= 0) {
+      this.cooldown = 0;
+      this.firingStreak = false;
+    }
   }
 
   /** Fires as many rounds as the cooldown allows this frame. Returns true if any fired. */
   private tryFire(w: WeaponDef): boolean {
-    if (this.switchTimer > 0 || this.cooldown > 0 || !this.ctx.player.canFire()) return false;
+    if (this.switchTimer > 0 || this.cooldown > 0 || !this.ctx.player.canFire())
+      return false;
     if (this.reloading) {
       // Shell-by-shell reloads can be interrupted as soon as there is a round to fire.
       if (!w.reloadPerShell || this.state.mag === 0) return false;
@@ -288,8 +301,15 @@ export class WeaponSystem {
       return false;
     }
     const interval = this.interval(w);
+    // The first round of a burst starts the clock fresh (no credit for the frame it was pressed in).
+    if (!this.firingStreak) this.cooldown = 0;
+    this.firingStreak = true;
     let shots = 0;
-    while (this.cooldown <= 0 && this.state.mag > 0 && shots < MAX_SHOTS_PER_FRAME) {
+    while (
+      this.cooldown <= 0 &&
+      this.state.mag > 0 &&
+      shots < MAX_SHOTS_PER_FRAME
+    ) {
       this.fireRound(w);
       this.cooldown += interval;
       shots++;
@@ -357,11 +377,16 @@ export class WeaponSystem {
     if (ax * ax + az * az < MIN_AIM_DIST * MIN_AIM_DIST || flat < 1e-3) {
       aimDir.set(Math.sin(player.facing), 0, Math.cos(player.facing));
     } else {
-      aimDir.y = THREE.MathUtils.clamp(aimDir.y, -MAX_PITCH * flat, MAX_PITCH * flat);
+      aimDir.y = THREE.MathUtils.clamp(
+        aimDir.y,
+        -MAX_PITCH * flat,
+        MAX_PITCH * flat,
+      );
       aimDir.normalize();
     }
     const chestToMuzzle =
-      (muzzle.x - player.position.x) * aimDir.x + (muzzle.z - player.position.z) * aimDir.z;
+      (muzzle.x - player.position.x) * aimDir.x +
+      (muzzle.z - player.position.z) * aimDir.z;
     this.rayBackset = THREE.MathUtils.clamp(chestToMuzzle, 0, MAX_RAY_BACKSET);
     rayOrigin.copy(muzzle).addScaledVector(aimDir, -this.rayBackset);
   }
@@ -384,7 +409,13 @@ export class WeaponSystem {
 
     fx.impact(hit, dir);
     if (prop) {
-      world.applyBulletHit(prop, hit, dir, w.damage * tuning.damageMul, w.impulse * tuning.impulseMul);
+      world.applyBulletHit(
+        prop,
+        hit,
+        dir,
+        w.damage * tuning.damageMul,
+        w.impulse * tuning.impulseMul,
+      );
       stats.hits++;
     }
     events.emit("impact", { hit, dir, weapon: w });
@@ -407,7 +438,10 @@ export class WeaponSystem {
   }
 
   private pumpSlide(): void {
-    this.ctx.events.emit("reloadStage", { weapon: this.current, stage: "pump" });
+    this.ctx.events.emit("reloadStage", {
+      weapon: this.current,
+      stage: "pump",
+    });
     this.ejectCasing(this.current);
   }
 
@@ -424,7 +458,8 @@ export class WeaponSystem {
     this.pumping = false;
     const mul = Math.max(0.05, this.ctx.tuning.reloadSpeedMul);
     const duration = w.reloadPerShell
-      ? (w.reloadTime * Math.min(w.magSize - s.mag, s.reserve) + PUMP_TIME) / mul
+      ? (w.reloadTime * Math.min(w.magSize - s.mag, s.reserve) + PUMP_TIME) /
+        mul
       : w.reloadTime / mul;
     this.ctx.events.emit("reloadStart", { weapon: w, duration });
   }
@@ -442,7 +477,10 @@ export class WeaponSystem {
       this.reloadStage < MAG_STAGES.length &&
       this.reloadProgress >= MAG_STAGES[this.reloadStage][0]
     ) {
-      this.ctx.events.emit("reloadStage", { weapon: w, stage: MAG_STAGES[this.reloadStage][1] });
+      this.ctx.events.emit("reloadStage", {
+        weapon: w,
+        stage: MAG_STAGES[this.reloadStage][1],
+      });
       this.reloadStage++;
     }
     if (this.reloadProgress < 1) return;

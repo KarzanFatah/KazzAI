@@ -9,6 +9,7 @@ import type { GameContext, HitInfo, Surface } from "./types";
  *  - one decal pool (bullet holes + scorch marks),
  *  - one reused point light for flashes.
  * Pools are fixed-size; when one is full the oldest particle is recycled. Nothing allocates per hit.
+ * The particle shaders skip tone mapping: ACES would wash every bright additive colour to white.
  */
 
 const TAU = Math.PI * 2;
@@ -280,8 +281,14 @@ const DECAL_PAINTERS: Painter[] = [
     g.fillStyle = "rgba(200,160,108,0.75)";
     jaggedPath(g, rng, 30, 0.38, 14);
     g.fill();
-    cracks(g, rng, 7, 24, 54, "rgba(30,18,10,0.85)", () =>
-      (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.8,
+    cracks(
+      g,
+      rng,
+      7,
+      24,
+      54,
+      "rgba(30,18,10,0.85)",
+      () => (rng() < 0.5 ? 0 : Math.PI) + (rng() - 0.5) * 0.8,
     );
     radial(g, 0, 0, 22, [
       [0, "rgba(8,5,3,1)"],
@@ -307,16 +314,17 @@ const DECAL_PAINTERS: Painter[] = [
   },
   // Scorch: soft black blotches.
   (g, rng) => {
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < 20; i++) {
       const a = rng() * TAU;
-      const d = rng() * 22;
-      radial(g, Math.cos(a) * d, Math.sin(a) * d, 18 + rng() * 18, [
-        [0, "rgba(8,6,5,0.55)"],
+      const d = 8 + rng() * 24;
+      radial(g, Math.cos(a) * d, Math.sin(a) * d, 12 + rng() * 16, [
+        [0, "rgba(8,6,5,0.5)"],
         [1, "rgba(8,6,5,0)"],
       ]);
     }
-    radial(g, 0, 0, 40, [
-      [0, "rgba(0,0,0,0.75)"],
+    radial(g, 0, 0, 34, [
+      [0, "rgba(0,0,0,0.8)"],
+      [0.6, "rgba(10,8,6,0.45)"],
       [1, "rgba(0,0,0,0)"],
     ]);
   },
@@ -378,13 +386,15 @@ varying vec4 vColor;
 void main() {
   vec4 tex = texture2D(map, vUv);
   gl_FragColor = vec4(vColor.rgb * tex.rgb, vColor.a * tex.a);
-  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
 
 /** Camera-facing billboards from an atlas. One draw call. */
 class SpriteBatch {
-  readonly mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+  readonly mesh: THREE.Mesh<
+    THREE.InstancedBufferGeometry,
+    THREE.ShaderMaterial
+  >;
   private readonly pos: THREE.InstancedBufferAttribute;
   private readonly color: THREE.InstancedBufferAttribute;
   private readonly params: THREE.InstancedBufferAttribute;
@@ -417,6 +427,7 @@ class SpriteBatch {
       depthWrite: false,
       side: THREE.DoubleSide,
       blending,
+      toneMapped: false,
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
@@ -489,17 +500,19 @@ varying vec2 vUv;
 varying vec4 vColor;
 void main() {
   float across = 1.0 - abs(vUv.y);
-  float alpha = vColor.a * across * across * mix(0.12, 1.0, vUv.x);
-  float peak = max(vColor.r, max(vColor.g, vColor.b));
-  vec3 color = mix(vColor.rgb, vec3(peak), smoothstep(0.55, 1.0, across) * 0.7);
+  float alpha = vColor.a * across * mix(0.12, 1.0, vUv.x);
+  // Hotter core, same hue (tone mapping already whitens the brightest pixels).
+  vec3 color = vColor.rgb * (0.7 + 0.7 * smoothstep(0.4, 1.0, across));
   gl_FragColor = vec4(color, alpha);
-  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }`;
 
 /** Additive camera-facing line segments with a soft edge, a hot core and a fading tail. */
 class StreakBatch {
-  readonly mesh: THREE.Mesh<THREE.InstancedBufferGeometry, THREE.ShaderMaterial>;
+  readonly mesh: THREE.Mesh<
+    THREE.InstancedBufferGeometry,
+    THREE.ShaderMaterial
+  >;
   private readonly a: THREE.InstancedBufferAttribute;
   private readonly b: THREE.InstancedBufferAttribute;
   private readonly color: THREE.InstancedBufferAttribute;
@@ -536,6 +549,7 @@ class StreakBatch {
       depthWrite: false,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
+      toneMapped: false,
     });
     this.mesh = new THREE.Mesh(geometry, material);
     this.mesh.frustumCulled = false;
@@ -793,7 +807,7 @@ const SK = {
   drag: 14,
 } as const;
 const SK_STRIDE = 15;
-const SPARK_HOT = hdr(1, 0.93, 0.72, 3.2);
+const SPARK_HOT = hdr(1, 0.78, 0.32, 1.25);
 const SPARK_FLOOR = 0.005;
 
 /** Ballistic streaks: sparks, embers, the muzzle flame tongue. They cool from white-hot to `color`. */
@@ -890,8 +904,8 @@ const TR = {
 const TR_STRIDE = 9;
 const TRACER_SPEED = 400;
 const TRACER_TAIL = 8;
-const TRACER_WIDTH = 0.07;
-const TRACER_COLOR = hdr(1, 0.84, 0.48, 3.4);
+const TRACER_WIDTH = 0.085;
+const TRACER_COLOR = hdr(1, 0.7, 0.22, 1.3);
 
 /** Bullet tracers: a bright head racing from muzzle to impact with a fading tail behind it. */
 class TracerSim extends ParticleStore {
@@ -1029,7 +1043,11 @@ class DebrisPool extends ParticleStore {
     const o = this.alloc() * DB_STRIDE;
     const d = this.data;
     tmpQuat.setFromEuler(
-      tmpEuler.set(Math.random() * TAU, Math.random() * TAU, Math.random() * TAU),
+      tmpEuler.set(
+        Math.random() * TAU,
+        Math.random() * TAU,
+        Math.random() * TAU,
+      ),
     );
     randomUnit(tmpC).multiplyScalar(spin);
     d[o + DB.px] = pos.x;
@@ -1111,8 +1129,7 @@ class DebrisPool extends ParticleStore {
       ),
     );
 
-    const contact =
-      Math.min(d[o + DB.sx], d[o + DB.sy], d[o + DB.sz]) * 0.5;
+    const contact = Math.min(d[o + DB.sx], d[o + DB.sy], d[o + DB.sz]) * 0.5;
     if (d[o + DB.py] > contact || d[o + DB.vy] > 0) return;
     const hits = ++d[o + DB.hits];
     if (d[o + DB.vy] > -0.9 || hits >= this.opts.maxBounces) {
@@ -1169,7 +1186,10 @@ interface DecalRing {
  * Decals on dynamic props store their transform in the prop's local space and follow it.
  */
 class DecalPool {
-  readonly mesh: THREE.InstancedMesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
+  readonly mesh: THREE.InstancedMesh<
+    THREE.PlaneGeometry,
+    THREE.MeshStandardMaterial
+  >;
   private readonly tiles: THREE.InstancedBufferAttribute;
   private readonly colors: THREE.InstancedBufferAttribute;
   private readonly targets: (THREE.Object3D | null)[];
@@ -1209,7 +1229,10 @@ class DecalPool {
     const tileSize = `vec2(${(1 / DECAL_COLS).toFixed(4)}, ${(1 / DECAL_ROWS).toFixed(4)})`;
     material.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec2 decalTile;")
+        .replace(
+          "#include <common>",
+          "#include <common>\nattribute vec2 decalTile;",
+        )
         .replace(
           "#include <uv_vertex>",
           `#include <uv_vertex>\n\tvMapUv = vMapUv * ${tileSize} + decalTile;`,
@@ -1218,6 +1241,8 @@ class DecalPool {
     material.customProgramCacheKey = () => "kazz-decal";
 
     this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    // Slots start hidden: a later ring can raise `count` past slots that were never written.
+    for (let i = 0; i < capacity; i++) this.mesh.setMatrixAt(i, ZERO_MATRIX);
     this.colors = new THREE.InstancedBufferAttribute(
       new Float32Array(capacity * 3).fill(1),
       3,
@@ -1301,6 +1326,8 @@ class DecalPool {
   }
 
   clear(): void {
+    for (let i = 0; i < this.used; i++) this.mesh.setMatrixAt(i, ZERO_MATRIX);
+    this.mesh.instanceMatrix.needsUpdate = true;
     this.targets.fill(null);
     this.attached = 0;
     this.used = 0;
@@ -1379,8 +1406,8 @@ const MUZZLE_STAR: SpritePreset = {
   size1: 0.8,
   drag: 0,
   lift: 0,
-  color0: hdr(1, 0.84, 0.52, 3),
-  color1: hdr(1, 0.5, 0.16, 1.4),
+  color0: hdr(1, 0.8, 0.45, 1.5),
+  color1: hdr(1, 0.45, 0.1, 1),
   alpha: 1,
   fadeIn: 0,
   tile: SPRITE_STAR,
@@ -1392,8 +1419,8 @@ const MUZZLE_GLOW: SpritePreset = {
   size1: 1.2,
   drag: 0,
   lift: 0,
-  color0: hdr(1, 0.62, 0.26, 1.3),
-  color1: hdr(1, 0.4, 0.12, 0.6),
+  color0: hdr(1, 0.5, 0.15, 0.8),
+  color1: hdr(1, 0.35, 0.08, 0.4),
   alpha: 0.55,
   fadeIn: 0,
   tile: SPRITE_GLOW,
@@ -1405,8 +1432,8 @@ const IMPACT_FLARE: SpritePreset = {
   size1: 0.45,
   drag: 0,
   lift: 0,
-  color0: hdr(1, 0.86, 0.6, 2.6),
-  color1: hdr(1, 0.5, 0.2, 1),
+  color0: hdr(1, 0.8, 0.5, 1.4),
+  color1: hdr(1, 0.45, 0.15, 0.8),
   alpha: 1,
   fadeIn: 0,
   tile: SPRITE_FLARE,
@@ -1418,8 +1445,8 @@ const EXPLOSION_CORE: SpritePreset = {
   size1: 5.2,
   drag: 0,
   lift: 0,
-  color0: hdr(1, 0.92, 0.75, 3),
-  color1: hdr(1, 0.55, 0.2, 1.4),
+  color0: hdr(1, 0.88, 0.65, 1.6),
+  color1: hdr(1, 0.5, 0.15, 1),
   alpha: 1,
   fadeIn: 0,
   tile: SPRITE_GLOW,
@@ -1431,9 +1458,9 @@ const FIREBALL: SpritePreset = {
   size1: 2.6,
   drag: 3.5,
   lift: 2.5,
-  color0: hdr(1, 0.82, 0.48, 2.6),
-  color1: hdr(0.85, 0.22, 0.04, 1),
-  alpha: 1,
+  color0: hdr(1, 0.62, 0.22, 1.3),
+  color1: hdr(0.75, 0.16, 0.02),
+  alpha: 0.85,
   fadeIn: 0.04,
   tile: SPRITE_PUFF,
   spin: 2,
@@ -1444,8 +1471,8 @@ const FLAME: SpritePreset = {
   size1: 0.45,
   drag: 1,
   lift: 3,
-  color0: hdr(1, 0.75, 0.35, 2.2),
-  color1: hdr(0.9, 0.25, 0.05, 1),
+  color0: hdr(1, 0.6, 0.2, 1.2),
+  color1: hdr(0.8, 0.2, 0.03),
   alpha: 0.9,
   fadeIn: 0.1,
   tile: SPRITE_PUFF,
@@ -1515,9 +1542,9 @@ const DUST_COLOR: Record<Surface, THREE.Color> = {
   ground: new THREE.Color(0x6a7590),
 };
 
-const SPARK_COLOR = hdr(1, 0.45, 0.12, 1.6);
-const EMBER_COLOR = hdr(1, 0.34, 0.05, 1.8);
-const FLAME_TONGUE = hdr(1, 0.7, 0.3, 2);
+const SPARK_COLOR = hdr(1, 0.4, 0.07, 1.25);
+const EMBER_COLOR = hdr(1, 0.3, 0.04, 1.2);
+const FLAME_TONGUE = hdr(1, 0.6, 0.18, 1.3);
 const MUZZLE_LIGHT = new THREE.Color(0xffb35c);
 const EXPLOSION_LIGHT = new THREE.Color(0xff9a45);
 
@@ -1565,8 +1592,9 @@ const DECAL_STYLE: Record<Surface, DecalStyle | null> = {
   },
 };
 
-const RING_HOLES = 0;
-const RING_SCORCH = 1;
+// Scorch marks come first so bullet holes are drawn on top of them.
+const RING_SCORCH = 0;
+const RING_HOLES = 1;
 
 type CasingKind = "rifle" | "pistol" | "shell";
 
@@ -1638,7 +1666,13 @@ export class Effects {
     this.chips = new DebrisPool(
       new THREE.BoxGeometry(1, 1, 1),
       new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0.05 }),
-      { capacity: 220, shape: "box", fadeTime: 0.4, maxBounces: 3, castShadow: true },
+      {
+        capacity: 220,
+        shape: "box",
+        fadeTime: 0.4,
+        maxBounces: 3,
+        castShadow: true,
+      },
     );
     this.casings = new DebrisPool(
       new THREE.CylinderGeometry(0.5, 0.5, 1, 7),
@@ -1648,7 +1682,13 @@ export class Effects {
         roughness: 0.32,
         emissive: 0x3a2508,
       }),
-      { capacity: 48, shape: "cylinder", fadeTime: 0.5, maxBounces: 3, castShadow: false },
+      {
+        capacity: 48,
+        shape: "cylinder",
+        fadeTime: 0.5,
+        maxBounces: 3,
+        castShadow: false,
+      },
     );
     this.shells = new DebrisPool(
       createShellGeometry(),
@@ -1657,9 +1697,15 @@ export class Effects {
         metalness: 0.25,
         roughness: 0.45,
       }),
-      { capacity: 24, shape: "cylinder", fadeTime: 0.5, maxBounces: 3, castShadow: false },
+      {
+        capacity: 24,
+        shape: "cylinder",
+        fadeTime: 0.5,
+        maxBounces: 3,
+        castShadow: false,
+      },
     );
-    this.decals = new DecalPool(this.decalAtlas, [140, 10]);
+    this.decals = new DecalPool(this.decalAtlas, [10, 140]);
 
     this.root.add(
       this.decals.mesh,
@@ -1679,7 +1725,16 @@ export class Effects {
     this.glowSim.spawn(MUZZLE_GLOW, pos, ZERO, scale);
     // Short flame tongue jetting forward out of the barrel.
     tmpVel.copy(dir).multiplyScalar(9 * scale);
-    this.sparkSim.spawn(pos, tmpVel, 0.045, 0.15 * scale, 0.045, FLAME_TONGUE, 0, 0);
+    this.sparkSim.spawn(
+      pos,
+      tmpVel,
+      0.045,
+      0.15 * scale,
+      0.045,
+      FLAME_TONGUE,
+      0,
+      0,
+    );
     tmpA.copy(pos).addScaledVector(dir, 0.3);
     this.flashLight.flash(tmpA, MUZZLE_LIGHT, 5 * scale * scale, 7, 0.06);
   }
@@ -1700,7 +1755,7 @@ export class Effects {
       .normalize();
     switch (surface) {
       case "metal":
-        this.sparks(point, reflect, 10);
+        this.sparks(point, reflect, 12);
         this.glowSim.spawn(IMPACT_FLARE, point, ZERO, 1);
         this.dust(point, normal, 1, DUST_COLOR.metal);
         break;
@@ -1745,7 +1800,7 @@ export class Effects {
         pos,
         tmpVel,
         rand(0.18, 0.45),
-        rand(0.022, 0.038),
+        rand(0.028, 0.045),
         rand(0.018, 0.03),
         SPARK_COLOR,
       );
@@ -1795,9 +1850,19 @@ export class Effects {
     const count = Math.max(1, Math.round(amount * 2));
     for (let i = 0; i < count; i++) {
       tmpA.copy(pos).addScaledVector(dir, rand(0.05, 0.25));
-      randomUnit(tmpVel).multiplyScalar(0.25).addScaledVector(dir, rand(0.6, 1.6));
+      randomUnit(tmpVel)
+        .multiplyScalar(0.25)
+        .addScaledVector(dir, rand(0.6, 1.6));
       tmpVel.y += rand(0.2, 0.5);
-      this.smokeSim.spawn(MUZZLE_SMOKE, tmpA, tmpVel, 1, i * 0.03, null, amount);
+      this.smokeSim.spawn(
+        MUZZLE_SMOKE,
+        tmpA,
+        tmpVel,
+        1,
+        i * 0.03,
+        null,
+        amount,
+      );
     }
   }
 
@@ -1854,7 +1919,13 @@ export class Effects {
       tmpVel.y = Math.abs(tmpVel.y) * 0.8 + 0.2;
       tmpB.copy(tmpA).addScaledVector(tmpVel, rand(0.1, 0.5) * k);
       tmpVel.multiplyScalar(rand(2, 6) * k).y += 1.5;
-      this.glowSim.spawn(FIREBALL, tmpB, tmpVel, k, i < 9 ? 0 : rand(0.03, 0.14));
+      this.glowSim.spawn(
+        FIREBALL,
+        tmpB,
+        tmpVel,
+        k,
+        i < 9 ? 0 : rand(0.03, 0.14),
+      );
     }
     this.smokeColumn(pos, k);
     this.blastRing(pos, k);
@@ -1970,7 +2041,16 @@ export class Effects {
   private embers(pos: THREE.Vector3, dir: THREE.Vector3, count: number): void {
     for (let i = 0; i < count; i++) {
       jitterDir(tmpVel, dir, 1).multiplyScalar(rand(0.8, 2.5));
-      this.sparkSim.spawn(pos, tmpVel, rand(0.9, 1.6), rand(0.025, 0.04), 0.01, EMBER_COLOR, 0.25, 1.5);
+      this.sparkSim.spawn(
+        pos,
+        tmpVel,
+        rand(0.9, 1.6),
+        rand(0.025, 0.04),
+        0.01,
+        EMBER_COLOR,
+        0.25,
+        1.5,
+      );
     }
   }
 
@@ -2009,7 +2089,13 @@ export class Effects {
         pos.z + tmpVel.z * 0.6 * k,
       );
       tmpVel.set(tmpVel.x * 0.8, rand(1.5, 3.2), tmpVel.z * 0.8);
-      this.smokeSim.spawn(SMOKE_COLUMN, tmpA, tmpVel, k, i * 0.05 + rand(0, 0.1));
+      this.smokeSim.spawn(
+        SMOKE_COLUMN,
+        tmpA,
+        tmpVel,
+        k,
+        i * 0.05 + rand(0, 0.1),
+      );
     }
   }
 
@@ -2030,7 +2116,14 @@ export class Effects {
       randomUnit(tmpVel);
       tmpVel.y = Math.abs(tmpVel.y) * 0.8 + 0.2;
       tmpVel.multiplyScalar(rand(6, 15) * k);
-      this.sparkSim.spawn(tmpA, tmpVel, rand(0.5, 1.1), rand(0.03, 0.05), 0.035, SPARK_COLOR);
+      this.sparkSim.spawn(
+        tmpA,
+        tmpVel,
+        rand(0.5, 1.1),
+        rand(0.03, 0.05),
+        0.035,
+        SPARK_COLOR,
+      );
     }
     this.embers(tmpA, UP, 16);
   }

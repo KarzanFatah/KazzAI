@@ -58,9 +58,9 @@ const FUSE_TIME = [0.15, 0.6] as const;
 const CHAIN_DELAY = [0.08, 0.3] as const;
 const EXPLOSION_RADIUS = 6;
 /** Peak velocity change (m/s) a barrel-mass prop gets at the centre of a blast. */
-const EXPLOSION_FORCE = 12;
-const EXPLOSION_MAX_DV = 22;
-const EXPLOSION_LIFT = 0.65;
+const EXPLOSION_FORCE = 9;
+const EXPLOSION_MAX_DV = 16;
+const EXPLOSION_LIFT = 0.55;
 
 const COLLISION_MIN_SPEED = 1.2;
 const COLLISION_FULL_SPEED = 8;
@@ -70,6 +70,8 @@ const RESPAWN_BELOW_Y = -10;
 const TARGET_PIVOT = new THREE.Vector3(0, 0.3, 0.03);
 const TARGET_DOWN_ANGLE = -Math.PI / 2 + 0.06;
 const TARGET_RAISE_DELAY = 3;
+/** Painted plates glow faintly so they read even when facing away from the sun. */
+const PLATE_GLOW = 0.14;
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
@@ -233,11 +235,17 @@ type HalfProfile = ReadonlyArray<readonly [number, number]>;
  * Extrudes a symmetric cross-section along local X, centred on the origin. `half` lists the
  * right half (x ≥ 0) from bottom to top; it ends up across local Z.
  */
-function profileGeometry(half: HalfProfile, length: number): THREE.BufferGeometry {
+function profileGeometry(
+  half: HalfProfile,
+  length: number,
+): THREE.BufferGeometry {
   const right = half.map(([x, y]) => new THREE.Vector2(x, y));
   const left = [...half].reverse().map(([x, y]) => new THREE.Vector2(-x, y));
   const shape = new THREE.Shape([...right, ...left]);
-  const g = new THREE.ExtrudeGeometry(shape, { depth: length, bevelEnabled: false });
+  const g = new THREE.ExtrudeGeometry(shape, {
+    depth: length,
+    bevelEnabled: false,
+  });
   g.translate(0, 0, -length / 2);
   g.rotateY(Math.PI / 2);
   return g;
@@ -395,6 +403,20 @@ function plasticBarrierGeometry(length: number): THREE.BufferGeometry {
   return b.build();
 }
 
+/** Unit sandbag: a superellipsoid, boxy with soft rounded seams. */
+function pillowGeometry(): THREE.BufferGeometry {
+  const g = new THREE.SphereGeometry(0.5, 12, 8);
+  const pos = g.getAttribute("position") as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    for (let c = 0; c < 3; c++) {
+      const v = pos.getComponent(i, c) * 2;
+      pos.setComponent(i, c, Math.sign(v) * Math.abs(v) ** 0.55 * 0.5);
+    }
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 /** Staggered rows of khaki bags, two deep with a single capping row. */
 function sandbagWallGeometry(variant: number): THREE.BufferGeometry {
   const rand = seededRandom(300 + variant);
@@ -408,12 +430,16 @@ function sandbagWallGeometry(variant: number): THREE.BufferGeometry {
     const depths = r < rows - 1 ? [-0.15, 0.15] : [0];
     const offset = r % 2 === 0 ? 0 : pitch / 2;
     for (const z of depths) {
-      for (let x = -length / 2 + pitch / 2 - offset; x < length / 2; x += pitch) {
+      for (
+        let x = -length / 2 + pitch / 2 - offset;
+        x < length / 2;
+        x += pitch
+      ) {
         const lo = Math.max(x - pitch / 2, -length / 2);
         const hi = Math.min(x + pitch / 2, length / 2);
         if (hi - lo < 0.15) continue;
         const tint = khaki[Math.floor(rand() * khaki.length)];
-        b.add(new THREE.SphereGeometry(0.5, 10, 6), {
+        b.add(pillowGeometry(), {
           at: [(lo + hi) / 2, y, z + (rand() - 0.5) * 0.03],
           rot: [0, (rand() - 0.5) * 0.12, (rand() - 0.5) * 0.06],
           scale: [(hi - lo) * 1.06, 0.2, 0.33],
@@ -476,7 +502,8 @@ function barrelGeometry(): THREE.BufferGeometry {
     b.add(new THREE.TorusGeometry(r + 0.003, 0.011, 4, 24), {
       at: [0, (rib - 0.5) * h, 0],
       rot: [Math.PI / 2, 0, 0],
-      uv: { v: barrelAtlasV(rib) },
+      // Sample plain paint next to the painted hoop; the torus itself catches the light.
+      uv: { v: barrelAtlasV(rib) - 0.02 },
     });
   }
   for (const end of [-1, 1]) {
@@ -499,13 +526,22 @@ function crateGeometry(size: number): THREE.BufferGeometry {
   const len = size + proud * 2;
   const batten = (): PartOptions => ({
     uv: CRATE_FRAME_UV,
-    color: woodTint(rand, 0.72 + rand() * 0.14),
+    color: woodTint(rand, 0.86 + rand() * 0.14),
   });
   for (const s1 of [-1, 1]) {
     for (const s2 of [-1, 1]) {
-      b.add(new THREE.BoxGeometry(len, t, t), { at: [0, s1 * o, s2 * o], ...batten() });
-      b.add(new THREE.BoxGeometry(t, len, t), { at: [s1 * o, 0, s2 * o], ...batten() });
-      b.add(new THREE.BoxGeometry(t, t, len), { at: [s1 * o, s2 * o, 0], ...batten() });
+      b.add(new THREE.BoxGeometry(len, t, t), {
+        at: [0, s1 * o, s2 * o],
+        ...batten(),
+      });
+      b.add(new THREE.BoxGeometry(t, len, t), {
+        at: [s1 * o, 0, s2 * o],
+        ...batten(),
+      });
+      b.add(new THREE.BoxGeometry(t, t, len), {
+        at: [s1 * o, s2 * o, 0],
+        ...batten(),
+      });
     }
   }
   return b.build();
@@ -515,11 +551,7 @@ function crateGeometry(size: number): THREE.BufferGeometry {
 function palletGeometry(): THREE.BufferGeometry {
   const rand = seededRandom(7);
   const b = new GeometryBuilder();
-  const board = (
-    size: Vec3Tuple,
-    at: Vec3Tuple,
-    grain: 0 | 1 | 2,
-  ): void => {
+  const board = (size: Vec3Tuple, at: Vec3Tuple, grain: 0 | 1 | 2): void => {
     b.add(new THREE.BoxGeometry(...size), {
       at: [at[0], at[1] - PALLET_HEIGHT / 2, at[2]],
       uv: "metric",
@@ -541,7 +573,9 @@ function palletGeometry(): THREE.BufferGeometry {
 
 function tireGeometry(): THREE.BufferGeometry {
   return new GeometryBuilder()
-    .add(new THREE.TorusGeometry(0.3, 0.12, 10, 24), { rot: [Math.PI / 2, 0, 0] })
+    .add(new THREE.TorusGeometry(0.3, 0.12, 10, 24), {
+      rot: [Math.PI / 2, 0, 0],
+    })
     .build();
 }
 
@@ -573,7 +607,10 @@ function targetStandGeometry(): THREE.BufferGeometry {
     });
   }
   for (const z of [0.2, -0.36]) {
-    b.add(new THREE.BoxGeometry(0.53, 0.05, 0.05), { at: [0, 0.05, z], uv: SOLID_UV });
+    b.add(new THREE.BoxGeometry(0.53, 0.05, 0.05), {
+      at: [0, 0.05, z],
+      uv: SOLID_UV,
+    });
   }
   for (const x of [-0.13, 0.13]) {
     b.add(new THREE.BoxGeometry(0.045, 0.27, 0.045), {
@@ -762,7 +799,9 @@ function dynamicModel(spawn: DynamicSpawn, barrelMass: number): DynamicModel {
         geometry: palletGeometry,
         material: woodMaterial(),
         ownMaterial: false,
-        shapes: [[new CANNON.Box(new CANNON.Vec3(0.6, PALLET_HEIGHT / 2, 0.5))]],
+        shapes: [
+          [new CANNON.Box(new CANNON.Vec3(0.6, PALLET_HEIGHT / 2, 0.5))],
+        ],
         mass: 15,
         surface: "wood",
         health: Infinity,
@@ -842,7 +881,14 @@ class LayoutBuilder {
   }
 
   /** `count` segments end to end along their local X axis, centred on (x, z). */
-  row(kind: StaticKind, x: number, z: number, yaw: number, count: number, gap = 0.03): this {
+  row(
+    kind: StaticKind,
+    x: number,
+    z: number,
+    yaw: number,
+    count: number,
+    gap = 0.03,
+  ): this {
     const step = STATIC_SPECS[kind].length + gap;
     for (let i = 0; i < count; i++) {
       const o = (i - (count - 1) / 2) * step;
@@ -852,7 +898,13 @@ class LayoutBuilder {
   }
 
   /** Fence panels from (x0, z0) to (x1, z1); `gates` lists panel indices left open. */
-  fenceLine(x0: number, z0: number, x1: number, z1: number, gates: number[]): this {
+  fenceLine(
+    x0: number,
+    z0: number,
+    x1: number,
+    z1: number,
+    gates: number[],
+  ): this {
     const dx = x1 - x0;
     const dz = z1 - z0;
     const count = Math.round(Math.hypot(dx, dz) / FENCE_STRIDE);
@@ -867,7 +919,14 @@ class LayoutBuilder {
 
   barrel(x: number, z: number, variant: BarrelVariant, y = 0, yaw = 0): this {
     const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw);
-    return this.dynamic("barrel", x, y + BARREL_HEIGHT / 2 + 0.001, z, q, variant);
+    return this.dynamic(
+      "barrel",
+      x,
+      y + BARREL_HEIGHT / 2 + 0.001,
+      z,
+      q,
+      variant,
+    );
   }
 
   /** A barrel on its side, resting on a flat face of its collision polygon. */
@@ -881,12 +940,20 @@ class LayoutBuilder {
   }
 
   explosive(x: number, z: number): this {
-    const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, Math.random() * 6);
+    const q = new THREE.Quaternion().setFromAxisAngle(
+      Y_AXIS,
+      x * 2.3 + z * 1.1,
+    );
     return this.dynamic("explosiveBarrel", x, BARREL_HEIGHT / 2 + 0.001, z, q);
   }
 
   /** Upright barrels stacked 3-2-1 along the local X axis. */
-  barrelPyramid(x: number, z: number, yaw: number, variants: BarrelVariant[]): this {
+  barrelPyramid(
+    x: number,
+    z: number,
+    yaw: number,
+    variants: BarrelVariant[],
+  ): this {
     const pitch = BARREL_RADIUS * 2 + 0.04;
     let n = 0;
     for (let level = 0; level < 3; level++) {
@@ -895,7 +962,13 @@ class LayoutBuilder {
         const o = (i - (count - 1) / 2) * pitch;
         const y = level * (BARREL_HEIGHT + 0.002);
         const variant = variants[n++ % variants.length];
-        this.barrel(x + Math.cos(yaw) * o, z - Math.sin(yaw) * o, variant, y, yaw);
+        this.barrel(
+          x + Math.cos(yaw) * o,
+          z - Math.sin(yaw) * o,
+          variant,
+          y,
+          yaw,
+        );
       }
     }
     return this;
@@ -903,7 +976,15 @@ class LayoutBuilder {
 
   crate(x: number, z: number, size: number, yaw: number, baseY = 0): this {
     const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw);
-    return this.dynamic("crate", x, baseY + size / 2 + 0.001, z, q, "rust", size);
+    return this.dynamic(
+      "crate",
+      x,
+      baseY + size / 2 + 0.001,
+      z,
+      q,
+      "rust",
+      size,
+    );
   }
 
   /** 3-2-1 pyramid of large crates along the local X axis. */
@@ -979,17 +1060,25 @@ function buildLayout(): LayoutBuilder {
     .fenceLine(maxX, minZ + inset, maxX, maxZ - inset, [6, 15]);
 
   // Reference composition north of the spawn: fence row, orange pair, three drums, concrete.
-  L.place("fence", -7.7, -9.6)
-    .row("fence", 0, -9.6, 0, 2, 0.06)
-    .place("fence", 7.6, -9.6)
-    .row("plasticBarrier", -5.2, -5.3, 0, 2)
-    .barrel(-1.75, -4.8, "blue")
-    .barrel(-0.55, -5.65, "green")
-    .barrel(0.7, -5.05, "rust")
-    .place("concreteBarrier", 4.4, -5.3);
+  // The green drum sits on the spawn axis, so shooting straight ahead hits it.
+  L.place("fence", -7.1, -8.7)
+    .row("fence", 0.4, -8.7, 0, 2, 0.06)
+    .place("fence", 6.9, -8.7)
+    .row("plasticBarrier", -3.75, -4.3, 0, 2)
+    .barrel(-1.2, -3.85, "blue")
+    .barrel(0, -4.65, "green")
+    .barrel(1.25, -4.05, "rust")
+    .place("concreteBarrier", 3.65, -4.3);
 
   // Barrel pyramid and loose drums west of the spawn.
-  L.barrelPyramid(-9.5, 0.5, 0.2, ["rust", "blue", "green", "green", "rust", "blue"])
+  L.barrelPyramid(-9.5, 0.5, 0.2, [
+    "rust",
+    "blue",
+    "green",
+    "green",
+    "rust",
+    "blue",
+  ])
     .lyingBarrel(-11.6, 2.8, "blue", 0.6)
     .barrel(-7.4, 2.6, "rust")
     .barrel(-12.2, -1.4, "green");
@@ -1017,17 +1106,18 @@ function buildLayout(): LayoutBuilder {
     .explosive(14.5, -11.2)
     .crate(15.6, -10.4, 0.8, 0.3)
     .barrel(13.0, -11.8, "green")
-    .explosive(4.7, -12.4);
+    .explosive(4.5, -11.6);
 
   // Steel poppers downrange (north-east) at increasing distances.
+  // Each has a clear line of fire from the spawn (past the fence row and the range props).
   const poppers = [
-    [11, -17],
-    [14.5, -21],
-    [18, -25.5],
-    [21.5, -30],
-    [25, -35],
+    [13, -17],
+    [16.5, -21.5],
+    [20, -26],
+    [23, -30.5],
+    [26, -35],
     [9, -27],
-    [16, -33],
+    [13.5, -37],
   ];
   for (const [x, z] of poppers) L.target(x, z);
   L.place("sandbag", 8, -13, -0.6);
@@ -1112,7 +1202,11 @@ interface Fuse {
 class StaticBatch {
   private readonly groups = new Map<THREE.Material, THREE.BufferGeometry[]>();
 
-  add(geometry: THREE.BufferGeometry, material: THREE.Material, matrix: THREE.Matrix4): void {
+  add(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    matrix: THREE.Matrix4,
+  ): void {
     let list = this.groups.get(material);
     if (!list) {
       list = [];
@@ -1172,14 +1266,19 @@ class SteelTarget {
 
     this.material = targetPlateMaterial().clone();
     this.material.emissive.setHex(0xfff0c8);
-    this.material.emissiveIntensity = 0;
+    this.material.emissiveIntensity = PLATE_GLOW;
     const plate = new THREE.Mesh(plateGeometry, this.material);
     plate.castShadow = true;
     plate.receiveShadow = true;
     this.pivot.add(plate);
 
     this.yawQuat.setFromAxisAngle(C_Y_AXIS, placement.yaw);
-    this.standBody = staticBody(physicsMaterial, placement.x, placement.z, placement.yaw);
+    this.standBody = staticBody(
+      physicsMaterial,
+      placement.x,
+      placement.z,
+      placement.yaw,
+    );
     this.standBody.addShape(
       new CANNON.Box(new CANNON.Vec3(0.28, 0.16, 0.34)),
       new CANNON.Vec3(0, 0.16, -0.06),
@@ -1211,15 +1310,18 @@ class SteelTarget {
       surface: "steel",
       dynamic: false,
       vaultable: false,
-      bounds: orientedBox(placement.x, placement.z, placement.yaw, 0.6, 1.45, 0.7),
+      bounds: orientedBox(
+        placement.x,
+        placement.z,
+        placement.yaw,
+        0.6,
+        1.45,
+        0.7,
+      ),
       health: Infinity,
       maxHealth: Infinity,
       alive: true,
     };
-  }
-
-  get isDown(): boolean {
-    return this.down;
   }
 
   /** Flashes the plate; knocks it down if it is up. Returns true when it fell. */
@@ -1236,7 +1338,8 @@ class SteelTarget {
   update(dt: number): void {
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 5);
-      this.material.emissiveIntensity = this.flash * this.flash * 0.9;
+      this.material.emissiveIntensity =
+        PLATE_GLOW + this.flash * this.flash * 0.9;
     }
     if (this.down) {
       this.raiseTimer -= dt;
@@ -1251,7 +1354,8 @@ class SteelTarget {
     const goal = this.down ? TARGET_DOWN_ANGLE : 0;
     const stiffness = this.down ? 160 : 70;
     const damping = this.down ? 6 : 5.5;
-    const accel = stiffness * (goal - this.angle) - damping * this.angularVelocity;
+    const accel =
+      stiffness * (goal - this.angle) - damping * this.angularVelocity;
     this.angularVelocity += accel * dt;
     this.angle += this.angularVelocity * dt;
     if (this.angle < TARGET_DOWN_ANGLE) {
@@ -1276,7 +1380,7 @@ class SteelTarget {
     this.settled = true;
     this.raiseTimer = 0;
     this.flash = 0;
-    this.material.emissiveIntensity = 0;
+    this.material.emissiveIntensity = PLATE_GLOW;
     this.syncPlate();
   }
 
@@ -1401,8 +1505,10 @@ export class World {
     this.buildEnvironment();
 
     const batch = new StaticBatch();
-    for (const placement of this.layout.statics) this.addStatic(placement, batch);
-    for (const placement of this.layout.targets) this.addTarget(placement, batch);
+    for (const placement of this.layout.statics)
+      this.addStatic(placement, batch);
+    for (const placement of this.layout.targets)
+      this.addTarget(placement, batch);
     this.staticMeshes = batch.build(this.staticRoot);
 
     this.barrelMass = this.ctx.tuning.barrelMass;
@@ -1491,7 +1597,8 @@ export class World {
 
       if (entry.prop.kind === "explosiveBarrel") {
         entry.prop.health -= 30 + 150 * falloff;
-        if (entry.prop.health <= 0) this.startFuse(entry, randRange(CHAIN_DELAY));
+        if (entry.prop.health <= 0)
+          this.startFuse(entry, randRange(CHAIN_DELAY));
       }
 
       const dv = Math.min(
@@ -1503,23 +1610,21 @@ export class World {
           Math.sqrt(refMass / body.mass),
       );
       _vec.y = 0;
-      if (_vec.lengthSq() < 1e-6) _vec.set(Math.random() - 0.5, 0, Math.random() - 0.5);
+      if (_vec.lengthSq() < 1e-6)
+        _vec.set(Math.random() - 0.5, 0, Math.random() - 0.5);
       _vec.normalize();
       _vec.y = EXPLOSION_LIFT + 0.35 * falloff;
       _vec.normalize().multiplyScalar(body.mass * dv);
       _impulse.set(_vec.x, _vec.y, _vec.z);
       // Push below and off the centre so props tumble instead of sliding.
-      _rel.set(
-        (Math.random() - 0.5) * 0.3,
-        -0.15,
-        (Math.random() - 0.5) * 0.3,
-      );
+      _rel.set((Math.random() - 0.5) * 0.3, -0.15, (Math.random() - 0.5) * 0.3);
       body.wakeUp();
       body.applyImpulse(_impulse, _rel);
     }
 
     for (const target of this.targets) {
-      if (target.center.distanceTo(position) < radius) this.knockTarget(target, 10);
+      if (target.center.distanceTo(position) < radius)
+        this.knockTarget(target, 10);
     }
   }
 
@@ -1568,7 +1673,9 @@ export class World {
   private buildEnvironment(): void {
     const { scene } = this.ctx;
     const background =
-      scene.background instanceof THREE.Color ? scene.background.getHex() : 0x222b38;
+      scene.background instanceof THREE.Color
+        ? scene.background.getHex()
+        : 0x222b38;
     scene.fog = new THREE.Fog(background, FOG_NEAR, FOG_FAR);
 
     const geometry = new THREE.PlaneGeometry(FLOOR_SIZE, FLOOR_SIZE);
@@ -1584,7 +1691,10 @@ export class World {
     this.root.add(this.floor, this.hemi, this.sun, this.sun.target);
   }
 
-  private geometry(key: string, create: () => THREE.BufferGeometry): THREE.BufferGeometry {
+  private geometry(
+    key: string,
+    create: () => THREE.BufferGeometry,
+  ): THREE.BufferGeometry {
     let geometry = this.geometries.get(key);
     if (!geometry) {
       geometry = create();
@@ -1604,7 +1714,9 @@ export class World {
     this.staticRoot.add(anchor);
 
     const variant = Math.abs(Math.round(x * 7 + z * 13)) % spec.variants;
-    const geometry = this.geometry(`${kind}-${variant}`, () => spec.geometry(variant));
+    const geometry = this.geometry(`${kind}-${variant}`, () =>
+      spec.geometry(variant),
+    );
     batch.add(geometry, spec.material(), anchor.matrix);
 
     const body = staticBody(this.ctx.physics.materials.prop, x, z, yaw);
@@ -1639,7 +1751,8 @@ export class World {
       this.ctx.physics.materials.prop,
     );
     const root = target.prop.object;
-    batch.add(this.geometry("popper-stand", targetStandGeometry), steelMaterial(), root.matrixWorld);
+    const stand = this.geometry("popper-stand", targetStandGeometry);
+    batch.add(stand, steelMaterial(), root.matrixWorld);
     this.root.add(root);
     this.ctx.physics.addBody(target.standBody);
     this.ctx.physics.addBody(target.plateBody);
@@ -1760,7 +1873,8 @@ export class World {
     for (let i = this.fuses.length - 1; i >= 0; i--) {
       const fuse = this.fuses[i];
       const { body, ownMaterial } = fuse.entry;
-      if (ownMaterial) ownMaterial.emissiveIntensity = 0.35 + Math.random() * 1.15;
+      if (ownMaterial)
+        ownMaterial.emissiveIntensity = 0.35 + Math.random() * 1.15;
       fuse.puff -= dt;
       if (fuse.puff <= 0) {
         fuse.puff = 0.05;
@@ -1790,7 +1904,10 @@ export class World {
     if (!target.knock(push)) return;
     const { stats, events } = this.ctx;
     stats.targetsDropped++;
-    events.emit("targetHit", { position: target.center, total: stats.targetsDropped });
+    events.emit("targetHit", {
+      position: target.center,
+      total: stats.targetsDropped,
+    });
   }
 }
 

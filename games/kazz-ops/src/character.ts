@@ -101,6 +101,7 @@ const _boneX = new THREE.Vector3();
 const _boneY = new THREE.Vector3();
 const _boneZ = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
+const _invWeapon = new THREE.Matrix4();
 
 /** Orientation of a bone running from `from` to `to` along its local -Y, local +Z toward `bend`. */
 function boneOrientation(
@@ -286,6 +287,7 @@ class PartFactory {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(x, y, z);
     mesh.castShadow = true;
+    mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
   }
@@ -468,7 +470,7 @@ interface WeaponRig {
   /** Magazine on the gun, hidden while it is out during a reload. */
   mag: THREE.Object3D | null;
   magOut: TimeWindow | null;
-  /** Mag / shell carried by the support hand during parts of the reload. */
+  /** Mag / shell carried by the support hand (kept upright in weapon axes, palm at its base). */
   handItem: THREE.Object3D;
   handItemWindows: TimeWindow[];
   pump: THREE.Object3D | null;
@@ -507,7 +509,7 @@ function buildCarbine(f: PartFactory, m: Materials): WeaponRig {
   mag.rotation.x = -0.25;
 
   const handItem = new THREE.Group();
-  f.box(handItem, m.gunPolymer, 0.03, 0.17, 0.068, 0, -0.08, 0);
+  f.box(handItem, m.gunPolymer, 0.03, 0.17, 0.068, 0, 0.05, -0.015).rotation.x = -0.25;
 
   return {
     id: "carbine",
@@ -571,7 +573,7 @@ function buildPistol(f: PartFactory, m: Materials): WeaponRig {
   const mag = f.box(g, m.gunMetal, 0.028, 0.02, 0.042, 0, -0.06, -0.017);
 
   const handItem = new THREE.Group();
-  f.box(handItem, m.gunMetal, 0.024, 0.1, 0.035, 0, -0.06, 0);
+  f.box(handItem, m.gunMetal, 0.024, 0.1, 0.035, 0, 0.055, 0.005).rotation.x = -0.22;
 
   return {
     id: "pistol",
@@ -646,8 +648,8 @@ function buildShotgun(f: PartFactory, m: Materials): WeaponRig {
   for (const z of [-0.05, 0, 0.05]) f.cylinder(pump, m.gunMetal, 0.03, 0.012, 0, 0, z, "z");
 
   const handItem = new THREE.Group();
-  f.cylinder(handItem, m.shell, 0.012, 0.06, 0, -0.06, 0);
-  f.cylinder(handItem, m.brass, 0.0125, 0.015, 0, -0.03, 0);
+  f.cylinder(handItem, m.shell, 0.012, 0.06, 0, 0.035, 0);
+  f.cylinder(handItem, m.brass, 0.0125, 0.015, 0, 0.008, 0);
 
   return {
     id: "shotgun",
@@ -735,7 +737,7 @@ export class CharacterModel {
   // Gait: phase 0..1 per two steps; left foot strikes at 0, right at 0.5.
   private phase = 0;
   private stanceFrac = 0.6;
-  private stride = 0.3; // half stride length
+  private stride = 0.3; // effective half stride length
   private liftHeight = 0.1;
   private readonly velLocal = new THREE.Vector3();
   private readonly gaitDir = new THREE.Vector3(0, 0, 1);
@@ -761,6 +763,9 @@ export class CharacterModel {
   /** Smoothed weapon pose (relative to the shoulder centre, model axes). */
   private readonly posePos = new THREE.Vector3();
   private readonly poseRot = new THREE.Vector3();
+  /** Smoothed support-hand target in weapon space (moves with the gun, never jumps). */
+  private readonly supportLocal = new THREE.Vector3();
+  private snapSupport = true;
   /** Chest frame relative to root, rebuilt every update. */
   private readonly chestMatrix = new THREE.Matrix4();
   private readonly chestQuat = new THREE.Quaternion();
@@ -811,7 +816,7 @@ export class CharacterModel {
     this.updateActions(step, anim);
     this.poseTorso();
     this.poseWeapon(step, anim);
-    this.poseArms();
+    this.poseArms(step);
     this.poseLegs();
     this.poseHead();
   }
@@ -887,9 +892,11 @@ export class CharacterModel {
     const legsFree = a.state !== "slide" && a.state !== "vault";
     this.gaitW = damp(this.gaitW, legsFree ? clamp01(speed / 0.8) : 0, 9, dt);
     this.runW = damp(this.runW, clamp01((speed - 3.8) / 2.4), 6, dt);
-    // Fixed stride, cadence scales with speed; stance shrinks into a running flight phase.
-    this.stanceFrac = clamp(0.62 - 0.06 * speed, 0.28, 0.62);
-    this.stride = 0.3 + 0.1 * this.crouchW + 0.03 * this.runW;
+    // Stance shrinks into a running flight phase. Strides are shorter sideways and when slow
+    // (short shuffle steps); cadence follows so planted feet never slide.
+    this.stanceFrac = damp(this.stanceFrac, clamp(0.64 - 0.065 * speed, 0.2, 0.62), 5, dt);
+    const strideScale = Math.max(clamp01(vLen / 1.2), 0.25) * (1 - 0.4 * Math.abs(this.gaitDir.x));
+    this.stride = (0.3 + 0.1 * this.crouchW + 0.03 * this.runW) * strideScale;
     const cycle = (2 * this.stride) / this.stanceFrac;
     this.phase = (this.phase + (speed * dt) / cycle) % 1;
     this.liftHeight = (0.09 + 0.14 * this.runW + 0.05 * this.tacticalW) * (1 - 0.4 * this.crouchW);
@@ -1039,11 +1046,13 @@ export class CharacterModel {
     const rp = this.reloadProgress;
     if (w.mag) w.mag.visible = !(a.reloading && w.magOut && inWindow(rp, w.magOut));
     let holding = false;
-    if (a.reloading) for (const win of w.handItemWindows) holding ||= inWindow(rp, win);
+    if (a.reloading) {
+      for (let i = 0; i < w.handItemWindows.length; i++) holding ||= inWindow(rp, w.handItemWindows[i]);
+    }
     w.handItem.visible = holding;
   }
 
-  private poseArms(): void {
+  private poseArms(dt: number): void {
     const { armL, armR } = this.body;
     _grip.copy(this.weaponRoot.position);
     this.rootPosition(this.weapon.anchors.support, _support);
@@ -1065,20 +1074,32 @@ export class CharacterModel {
       _support.lerp(_target, this.vaultW);
     }
 
+    // Smooth in weapon space: rigid with the gun, but switching anchors or weapons never pops.
+    const wr = this.weaponRoot;
+    wr.updateMatrix();
+    _target.copy(_support).applyMatrix4(_invWeapon.copy(wr.matrix).invert());
+    if (this.snapSupport) this.supportLocal.copy(_target);
+    else this.supportLocal.lerp(_target, 1 - Math.exp(-20 * dt));
+    this.snapSupport = false;
+    _support.copy(this.supportLocal).applyMatrix4(wr.matrix);
+
     // Elbow hints; aiming tucks the elbows in.
     _pole.set(-0.8, -0.55, -0.35).lerp(_v1.set(-0.45, -0.85, -0.2), this.aimW);
     this.solveLimb(armR, this.chestQuat, _shoulderR, _grip, _pole);
     _pole.set(0.65, -0.75, -0.1).lerp(_v1.set(0.3, -0.95, 0.05), this.aimW);
     _pole.lerp(_v1.set(0.3, -0.3, -0.9), pumpArm);
     this.solveLimb(armL, this.chestQuat, _shoulderL, _support, _pole);
+    // The hand has no local rotation, so _qLower is also the hand's model-space rotation.
+    this.weapon.handItem.quaternion.copy(_qLower).invert().multiply(this.weaponRoot.quaternion);
   }
 
   private poseLegs(): void {
     const { hips, legL, legR } = this.body;
     const g = this.gaitW;
     const sf = this.stanceFrac;
-    // Sideways steps are shorter so the feet do not cross too far.
-    const half = this.stride * (1 - 0.4 * Math.abs(this.gaitDir.x));
+    const half = this.stride;
+    // Swing tangent matching the planted foot's backward motion (capped to limit overshoot).
+    const swingSlope = -Math.min((2 * (1 - sf)) / sf, 4) * half;
     const stepToe = g * (0.6 + 0.6 * this.runW);
     const crouchRest = this.crouchW * (1 - g);
 
@@ -1098,8 +1119,9 @@ export class CharacterModel {
         lift = 0.05 * heel;
         toe = 0.4 * heel;
       } else {
+        // Hermite back → front: the foot trails after toe-off and paws back before landing.
         const u = (p - sf) / (1 - sf);
-        along = half * (2 * smooth01(u) - 1);
+        along = half * (6 * u * u - 4 * u * u * u - 1) + swingSlope * (u * (1 - u) * (1 - 2 * u));
         lift = this.liftHeight * Math.sin(Math.PI * u);
         toe = (0.55 * (1 - u) - 0.35 * u) * Math.sin(Math.PI * u);
       }

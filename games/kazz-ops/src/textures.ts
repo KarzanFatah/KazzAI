@@ -293,7 +293,7 @@ export function makeGridTexture(): THREE.Texture {
         for (let i = 0; i < 40; i++) {
           const tone = rand() > 0.5 ? "#2b3648" : "#232c3b";
           const r = 60 + rand() * 120;
-          blob(g, rand, rand() * w, rand() * h, r, tone, 0.18, w, h);
+          blob(g, rand, rand() * w, rand() * h, r, tone, 0.08, w, h);
         }
         addNoise(g, w, h, 6, rand);
         const cell = w / GRID_TILE_METRES;
@@ -486,7 +486,14 @@ function drawBarrelLid(
   withCircleClip(g, cx, cy, c, () => {
     g.fillStyle = paint.lid;
     g.fillRect(ox, oy, s, s);
-    const sheen = g.createRadialGradient(cx - c * 0.3, cy - c * 0.3, 0, cx, cy, c);
+    const sheen = g.createRadialGradient(
+      cx - c * 0.3,
+      cy - c * 0.3,
+      0,
+      cx,
+      cy,
+      c,
+    );
     sheen.addColorStop(0, "rgba(255,255,255,0.12)");
     sheen.addColorStop(1, "rgba(0,0,0,0.18)");
     g.fillStyle = sheen;
@@ -621,7 +628,7 @@ export function makeWoodTexture(): THREE.Texture {
 }
 
 /** A UV inside the crate texture's plain frame board (solid colour for edge battens). */
-export const CRATE_FRAME_UV = [0.06, 0.5] as const;
+export const CRATE_FRAME_UV = [0.06, 0.35] as const;
 
 /** One crate face (UV 0..1 per face): framed planks with a diagonal brace and nails. */
 export function makeCrateTexture(): THREE.Texture {
@@ -713,16 +720,26 @@ export function makeConcreteTexture(): THREE.Texture {
       g.fillRect(0, 0, w, h);
       for (let i = 0; i < 26; i++) {
         const tone = rand() > 0.5 ? "#c9c4b8" : "#e6e2d8";
-        blob(g, rand, rand() * w, rand() * h, 20 + rand() * 50, tone, 0.25, w, h);
+        blob(
+          g,
+          rand,
+          rand() * w,
+          rand() * h,
+          20 + rand() * 50,
+          tone,
+          0.18,
+          w,
+          h,
+        );
       }
-      for (let i = 0; i < 6; i++) {
-        const r = 8 + rand() * 18;
-        blob(g, rand, rand() * w, rand() * h, r, "#a8a296", 0.2, w, h);
+      for (let i = 0; i < 4; i++) {
+        const r = 10 + rand() * 18;
+        blob(g, rand, rand() * w, rand() * h, r, "#b4aea2", 0.08, w, h);
       }
       // Air pockets.
-      for (let i = 0; i < 160; i++) {
-        g.fillStyle = `rgba(80,76,70,${0.2 + rand() * 0.4})`;
-        const s = 0.8 + rand() * 1.8;
+      for (let i = 0; i < 90; i++) {
+        g.fillStyle = `rgba(90,86,80,${0.12 + rand() * 0.2})`;
+        const s = 0.6 + rand() * 1.1;
         g.beginPath();
         g.arc(rand() * w, rand() * h, s, 0, Math.PI * 2);
         g.fill();
@@ -1017,9 +1034,9 @@ export function targetPlateMaterial(): THREE.MeshStandardMaterial {
     "target-plate",
     () =>
       new THREE.MeshStandardMaterial({
-        color: 0xf0e8d2,
-        roughness: 0.42,
-        metalness: 0.2,
+        color: 0xf6f1e4,
+        roughness: 0.5,
+        metalness: 0.05,
       }),
   );
 }
