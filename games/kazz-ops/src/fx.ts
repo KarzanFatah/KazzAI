@@ -8,7 +8,7 @@ import type { GameContext, HitInfo, Surface } from "./types";
  *  - three debris pools (chips/splinters, brass casings, shotgun shells),
  *  - one decal pool (bullet holes + scorch marks),
  *  - one reused point light for flashes.
- * Pools are fixed-size; when one is full the oldest particle is recycled. No per-hit allocation.
+ * Pools are fixed-size; when one is full the oldest particle is recycled. Nothing allocates per hit.
  * The particle shaders skip tone mapping: ACES would wash every bright additive colour to white.
  */
 
@@ -21,7 +21,7 @@ const LIE_FLAT = new THREE.Quaternion().setFromAxisAngle(
   new THREE.Vector3(1, 0, 0),
   Math.PI / 2,
 );
-/** Max fraction of its life a particle may age on its spawn frame (so it is always seen). */
+/** Fraction of its life a particle may advance on the frame it was spawned (so it is always seen). */
 const FIRST_FRAME = 0.25;
 
 const tmpA = new THREE.Vector3();
@@ -158,7 +158,7 @@ function cracks(
   }
 }
 
-/** Paints tiles into a cols x rows atlas. flipY is off: tile (c, r) sits at uv (c/cols, r/rows). */
+/** Paints tiles into a cols x rows atlas. flipY is off: tile (c, r) sits at uv (c / cols, r / rows). */
 function buildAtlas(
   cols: number,
   rows: number,
@@ -810,7 +810,7 @@ const SK_STRIDE = 15;
 const SPARK_HOT = hdr(1, 0.78, 0.32, 1.25);
 const SPARK_FLOOR = 0.005;
 
-/** Ballistic streaks (sparks, embers, muzzle flame) that cool from white-hot to `color`. */
+/** Ballistic streaks: sparks, embers, the muzzle flame tongue. They cool from white-hot to `color`. */
 class SparkSim extends ParticleStore {
   constructor(capacity: number) {
     super(capacity, SK_STRIDE, SK.age, SK.life);

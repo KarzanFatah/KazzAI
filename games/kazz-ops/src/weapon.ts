@@ -24,7 +24,7 @@ const MAX_SHOTS_PER_FRAME = 8;
 const MIN_AIM_DIST = 1.5;
 /** Max |slope| of the shot direction (rise per metre). */
 const MAX_PITCH = 0.35;
-/** Vertical spread is squashed: only sideways spread reads from above; low props stay hittable. */
+/** Vertical spread is squashed: from above only sideways spread reads, and it keeps low props hittable. */
 const VERTICAL_SPREAD = 0.35;
 /** How far behind the muzzle the hitscan ray may start (the muzzle-to-chest distance). */
 const MAX_RAY_BACKSET = 1.2;
@@ -301,7 +301,7 @@ export class WeaponSystem {
       return false;
     }
     const interval = this.interval(w);
-    // The first round of a burst starts the clock fresh (no credit for the frame of the press).
+    // The first round of a burst starts the clock fresh (no credit for the frame it was pressed in).
     if (!this.firingStreak) this.cooldown = 0;
     this.firingStreak = true;
     let shots = 0;
