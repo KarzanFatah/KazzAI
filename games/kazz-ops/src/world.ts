@@ -74,7 +74,6 @@ const TARGET_RAISE_DELAY = 3;
 const PLATE_GLOW = 0.14;
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
-const Y_AXIS = new THREE.Vector3(0, 1, 0);
 const C_X_AXIS = new CANNON.Vec3(1, 0, 0);
 const C_Y_AXIS = new CANNON.Vec3(0, 1, 0);
 const UP = new THREE.Vector3(0, 1, 0);
@@ -918,7 +917,7 @@ class LayoutBuilder {
   }
 
   barrel(x: number, z: number, variant: BarrelVariant, y = 0, yaw = 0): this {
-    const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw);
+    const q = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
     return this.dynamic(
       "barrel",
       x,
@@ -932,18 +931,15 @@ class LayoutBuilder {
   /** A barrel on its side, resting on a flat face of its collision polygon. */
   lyingBarrel(x: number, z: number, variant: BarrelVariant, yaw: number): this {
     const q = new THREE.Quaternion()
-      .setFromAxisAngle(Y_AXIS, yaw)
+      .setFromAxisAngle(UP, yaw)
       .multiply(_layoutQuat.setFromAxisAngle(X_AXIS, Math.PI / 2))
-      .multiply(_layoutQuat.setFromAxisAngle(Y_AXIS, Math.PI / 12));
+      .multiply(_layoutQuat.setFromAxisAngle(UP, Math.PI / 12));
     const y = BARREL_RADIUS * Math.cos(Math.PI / 12) + 0.002;
     return this.dynamic("barrel", x, y, z, q, variant);
   }
 
   explosive(x: number, z: number): this {
-    const q = new THREE.Quaternion().setFromAxisAngle(
-      Y_AXIS,
-      x * 2.3 + z * 1.1,
-    );
+    const q = new THREE.Quaternion().setFromAxisAngle(UP, x * 2.3 + z * 1.1);
     return this.dynamic("explosiveBarrel", x, BARREL_HEIGHT / 2 + 0.001, z, q);
   }
 
@@ -975,7 +971,7 @@ class LayoutBuilder {
   }
 
   crate(x: number, z: number, size: number, yaw: number, baseY = 0): this {
-    const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, yaw);
+    const q = new THREE.Quaternion().setFromAxisAngle(UP, yaw);
     return this.dynamic(
       "crate",
       x,
@@ -1006,7 +1002,7 @@ class LayoutBuilder {
   pallets(x: number, z: number, count: number, yaw: number): this {
     for (let i = 0; i < count; i++) {
       const jitter = yaw + (i % 2 ? 0.05 : -0.04);
-      const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, jitter);
+      const q = new THREE.Quaternion().setFromAxisAngle(UP, jitter);
       const y = PALLET_HEIGHT / 2 + i * (PALLET_HEIGHT + 0.002) + 0.001;
       this.dynamic("pallet", x, y, z, q);
     }
@@ -1015,14 +1011,14 @@ class LayoutBuilder {
 
   tires(x: number, z: number, count: number): this {
     for (let i = 0; i < count; i++) {
-      const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, i * 0.7);
+      const q = new THREE.Quaternion().setFromAxisAngle(UP, i * 0.7);
       this.dynamic("tire", x + (i % 2) * 0.03, 0.121 + i * 0.242, z, q);
     }
     return this;
   }
 
   cone(x: number, z: number): this {
-    const q = new THREE.Quaternion().setFromAxisAngle(Y_AXIS, x * 1.7 + z);
+    const q = new THREE.Quaternion().setFromAxisAngle(UP, x * 1.7 + z);
     return this.dynamic("cone", x, 0.201, z, q);
   }
 

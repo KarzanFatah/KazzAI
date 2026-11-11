@@ -6,7 +6,8 @@ type WeaponId = WeaponDef["id"];
 
 const TAU = Math.PI * 2;
 
-// Proportions in metres (~1.85 m to the top of the helmet). Model space: +Z forward, -X = right.
+// Proportions in metres (~1.85 m to the helmet top).
+// Model space: +Z forward, -X = the soldier's right.
 const HIPS_HEIGHT = 0.96;
 const CROUCH_DROP = 0.45;
 const SLIDE_DROP = 0.5;
@@ -36,8 +37,12 @@ const smooth01 = (v: number): number => {
   return t * t * (3 - 2 * t);
 };
 /** Frame-rate independent exponential approach of `current` toward `target`. */
-const damp = (current: number, target: number, rate: number, dt: number): number =>
-  target + (current - target) * Math.exp(-rate * dt);
+const damp = (
+  current: number,
+  target: number,
+  rate: number,
+  dt: number,
+): number => target + (current - target) * Math.exp(-rate * dt);
 const wrapAngle = (a: number): number => Math.atan2(Math.sin(a), Math.cos(a));
 
 /** Back-and-forth travel (0 → 1 → 0) of a pump or slide for normalised time u. */
@@ -103,7 +108,7 @@ const _boneZ = new THREE.Vector3();
 const _basis = new THREE.Matrix4();
 const _invWeapon = new THREE.Matrix4();
 
-/** Orientation of a bone running from `from` to `to` along its local -Y, local +Z toward `bend`. */
+/** Rotation of a bone from `from` to `to` (along local -Y, local +Z toward `bend`). */
 function boneOrientation(
   from: THREE.Vector3,
   to: THREE.Vector3,
@@ -117,8 +122,8 @@ function boneOrientation(
 }
 
 /**
- * Analytic two-bone IK, everything in one coordinate frame. The middle joint is pushed toward
- * `pole`. Writes the orientation of both bones (bones extend along local -Y).
+ * Analytic two-bone IK, everything in one coordinate frame. The middle joint is
+ * pushed toward `pole`. Writes both bone rotations (bones extend along local -Y).
  */
 function solveTwoBone(
   root: THREE.Vector3,
@@ -133,14 +138,19 @@ function solveTwoBone(
   const rawDist = dir.length();
   if (rawDist < 1e-5) dir.set(0, -1, 0);
   else dir.divideScalar(rawDist);
-  const dist = clamp(rawDist, Math.abs(upperLen - lowerLen) + 1e-3, (upperLen + lowerLen) * 0.999);
+  const dist = clamp(
+    rawDist,
+    Math.abs(upperLen - lowerLen) + 1e-3,
+    (upperLen + lowerLen) * 0.999,
+  );
 
   const bend = _ikBend.copy(pole).addScaledVector(dir, -pole.dot(dir));
   if (bend.lengthSq() < 1e-8) bend.set(0, 0, 1).addScaledVector(dir, -dir.z);
   bend.normalize();
 
   const cosA = clamp(
-    (upperLen * upperLen + dist * dist - lowerLen * lowerLen) / (2 * upperLen * dist),
+    (upperLen * upperLen + dist * dist - lowerLen * lowerLen) /
+      (2 * upperLen * dist),
     -1,
     1,
   );
@@ -154,14 +164,17 @@ function solveTwoBone(
   boneOrientation(mid, end, bend, outLower);
 }
 
-// ---------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Materials and primitive parts
 
 function createMaterials() {
   const std = (color: number, roughness: number, metalness = 0) =>
     new THREE.MeshStandardMaterial({ color, roughness, metalness });
   return {
-    camo: new THREE.MeshStandardMaterial({ map: makeCamoTexture(), roughness: 0.85 }),
+    camo: new THREE.MeshStandardMaterial({
+      map: makeCamoTexture(),
+      roughness: 0.85,
+    }),
     vest: std(0x1b1d20, 0.8),
     pouch: std(0x5d6268, 0.85),
     pouchDark: std(0x3d4147, 0.85),
@@ -186,7 +199,7 @@ function createMaterials() {
 type Materials = ReturnType<typeof createMaterials>;
 type Axis = "x" | "y" | "z";
 
-/** Builds the primitive meshes the soldier and guns are made of; owns their geometries. */
+/** Builds the primitive meshes of the soldier and guns; owns their geometries. */
 class PartFactory {
   private readonly geometries = new Map<string, THREE.BufferGeometry>();
 
@@ -200,7 +213,10 @@ class PartFactory {
     y = 0,
     z = 0,
   ): THREE.Mesh {
-    const geo = this.geometry(`box${w},${h},${d}`, () => new THREE.BoxGeometry(w, h, d));
+    const geo = this.geometry(
+      `box${w},${h},${d}`,
+      () => new THREE.BoxGeometry(w, h, d),
+    );
     return this.mesh(parent, geo, mat, x, y, z);
   }
 
@@ -219,7 +235,12 @@ class PartFactory {
   ): THREE.Mesh {
     const key = `cyl${radius},${radiusBottom},${length},${axis},${segments}`;
     const geo = this.geometry(key, () => {
-      const g = new THREE.CylinderGeometry(radius, radiusBottom, length, segments);
+      const g = new THREE.CylinderGeometry(
+        radius,
+        radiusBottom,
+        length,
+        segments,
+      );
       if (axis === "x") g.rotateZ(-Math.PI / 2);
       if (axis === "z") g.rotateX(Math.PI / 2);
       return g;
@@ -239,12 +260,18 @@ class PartFactory {
   ): THREE.Mesh {
     const geo = this.geometry(
       `cap${radius},${length}`,
-      () => new THREE.CapsuleGeometry(radius, Math.max(length - 2 * radius, 0.001), 4, 10),
+      () =>
+        new THREE.CapsuleGeometry(
+          radius,
+          Math.max(length - 2 * radius, 0.001),
+          4,
+          10,
+        ),
     );
     return this.mesh(parent, geo, mat, x, y, z);
   }
 
-  /** Sphere, or a band of one between polar angles thetaStart..thetaStart+thetaLength. */
+  /** Sphere, or the band of one from polar angle thetaStart over thetaLength. */
   sphere(
     parent: THREE.Object3D,
     mat: THREE.Material,
@@ -257,7 +284,16 @@ class PartFactory {
   ): THREE.Mesh {
     const geo = this.geometry(
       `sph${radius},${thetaLength},${thetaStart}`,
-      () => new THREE.SphereGeometry(radius, 18, 10, 0, TAU, thetaStart, thetaLength),
+      () =>
+        new THREE.SphereGeometry(
+          radius,
+          18,
+          10,
+          0,
+          TAU,
+          thetaStart,
+          thetaLength,
+        ),
     );
     return this.mesh(parent, geo, mat, x, y, z);
   }
@@ -267,7 +303,10 @@ class PartFactory {
     this.geometries.clear();
   }
 
-  private geometry(key: string, create: () => THREE.BufferGeometry): THREE.BufferGeometry {
+  private geometry(
+    key: string,
+    create: () => THREE.BufferGeometry,
+  ): THREE.BufferGeometry {
     let geo = this.geometries.get(key);
     if (!geo) {
       geo = create();
@@ -293,14 +332,19 @@ class PartFactory {
   }
 }
 
-function anchor(parent: THREE.Object3D, x: number, y: number, z: number): THREE.Object3D {
+function anchor(
+  parent: THREE.Object3D,
+  x: number,
+  y: number,
+  z: number,
+): THREE.Object3D {
   const obj = new THREE.Object3D();
   obj.position.set(x, y, z);
   parent.add(obj);
   return obj;
 }
 
-// ---------------------------------------------------------------------------------------------
+// --------------------------------------------------------------------------
 // Body
 
 /** Two-bone chain: `upper` sits at the joint, bones extend along local -Y. */
@@ -342,7 +386,13 @@ function createLimb(
   return { upper, lower, end, upperLen, lowerLen };
 }
 
-function buildTorso(f: PartFactory, m: Materials, hips: THREE.Group, spine: THREE.Group, chest: THREE.Group): void {
+function buildTorso(
+  f: PartFactory,
+  m: Materials,
+  hips: THREE.Group,
+  spine: THREE.Group,
+  chest: THREE.Group,
+): void {
   // Pelvis, belt and belt kit.
   f.box(hips, m.trousers, 0.32, 0.2, 0.21, 0, -0.02, 0);
   f.box(hips, m.vest, 0.34, 0.055, 0.23, 0, 0.065, 0);
@@ -357,7 +407,8 @@ function buildTorso(f: PartFactory, m: Materials, hips: THREE.Group, spine: THRE
   f.box(chest, m.vest, 0.39, 0.17, 0.25, 0, 0, 0);
   f.box(chest, m.vest, 0.34, 0.3, 0.07, 0, 0.12, 0.085);
   f.box(chest, m.vest, 0.34, 0.32, 0.07, 0, 0.13, -0.085);
-  for (const x of [-0.11, 0.11]) f.box(chest, m.vest, 0.09, 0.035, 0.22, x, 0.28, 0);
+  for (const x of [-0.11, 0.11])
+    f.box(chest, m.vest, 0.09, 0.035, 0.22, x, 0.28, 0);
   // Front: three mag pouches with flaps and an admin pouch.
   for (const x of [-0.09, 0, 0.09]) {
     f.box(chest, m.pouch, 0.078, 0.11, 0.055, x, 0.02, 0.145);
@@ -367,7 +418,8 @@ function buildTorso(f: PartFactory, m: Materials, hips: THREE.Group, spine: THRE
   // Back: small assault pack and a radio with antenna.
   f.box(chest, m.pack, 0.27, 0.28, 0.09, 0, 0.1, -0.165);
   f.box(chest, m.pouch, 0.2, 0.05, 0.08, 0, 0.255, -0.16);
-  for (const x of [-0.065, 0.065]) f.box(chest, m.pouch, 0.1, 0.12, 0.04, x, 0.07, -0.215);
+  for (const x of [-0.065, 0.065])
+    f.box(chest, m.pouch, 0.1, 0.12, 0.04, x, 0.07, -0.215);
   f.box(chest, m.pouchDark, 0.07, 0.15, 0.06, 0.14, 0.13, -0.15);
   f.cylinder(chest, m.gear, 0.006, 0.24, 0.155, 0.32, -0.16);
   f.cylinder(chest, m.gear, 0.075, 0.06, 0, 0.295, 0);
@@ -377,11 +429,46 @@ function buildHead(f: PartFactory, m: Materials, head: THREE.Group): void {
   f.cylinder(head, m.gear, 0.055, 0.1, 0, 0.03, 0);
   f.sphere(head, m.skin, 0.1, 0, 0.13, 0.012).scale.set(0.92, 1.05, 1);
   // Balaclava over the lower face: only a strip of skin shows under the goggles.
-  f.sphere(head, m.gear, 0.104, 0, 0.135, 0.012, Math.PI * 0.34, Math.PI * 0.66).scale.set(0.92, 1.05, 1);
-  // Helmet: big light dome with a lip, goggles band and NVG shroud on the front (reads from above).
-  f.sphere(head, m.helmet, 0.155, 0, 0.15, -0.005, Math.PI * 0.56).scale.set(1, 0.92, 1.1);
-  f.cylinder(head, m.helmetTrim, 0.158, 0.03, 0, 0.14, -0.005, "y", 0.165, 18).scale.z = 1.1;
-  f.cylinder(head, m.gear, 0.157, 0.022, 0, 0.172, -0.005, "y", 0.157, 18).scale.z = 1.1;
+  f.sphere(
+    head,
+    m.gear,
+    0.104,
+    0,
+    0.135,
+    0.012,
+    Math.PI * 0.34,
+    Math.PI * 0.66,
+  ).scale.set(0.92, 1.05, 1);
+  // Helmet: big light dome with a lip; goggles + NVG shroud mark the front from above.
+  f.sphere(head, m.helmet, 0.155, 0, 0.15, -0.005, Math.PI * 0.56).scale.set(
+    1,
+    0.92,
+    1.1,
+  );
+  f.cylinder(
+    head,
+    m.helmetTrim,
+    0.158,
+    0.03,
+    0,
+    0.14,
+    -0.005,
+    "y",
+    0.165,
+    18,
+  ).scale.z = 1.1;
+  f.cylinder(
+    head,
+    m.gear,
+    0.157,
+    0.022,
+    0,
+    0.172,
+    -0.005,
+    "y",
+    0.157,
+    18,
+  ).scale.z = 1.1;
   f.box(head, m.lens, 0.17, 0.045, 0.04, 0, 0.178, 0.162);
   f.box(head, m.gear, 0.055, 0.045, 0.03, 0, 0.235, 0.145);
   for (const x of [-0.152, 0.152]) {
@@ -407,8 +494,20 @@ function buildBody(f: PartFactory, m: Materials): BodyRig {
   buildTorso(f, m, hips, spine, chest);
   buildHead(f, m, head);
 
-  const armL = createLimb(chest, SHOULDER_X, SHOULDER_Y, UPPER_ARM_LEN, FOREARM_LEN);
-  const armR = createLimb(chest, -SHOULDER_X, SHOULDER_Y, UPPER_ARM_LEN, FOREARM_LEN);
+  const armL = createLimb(
+    chest,
+    SHOULDER_X,
+    SHOULDER_Y,
+    UPPER_ARM_LEN,
+    FOREARM_LEN,
+  );
+  const armR = createLimb(
+    chest,
+    -SHOULDER_X,
+    SHOULDER_Y,
+    UPPER_ARM_LEN,
+    FOREARM_LEN,
+  );
   for (const arm of [armL, armR]) {
     f.sphere(arm.upper, m.camo, 0.072, 0, -0.025, 0);
     f.capsule(arm.upper, m.camo, 0.056, 0.31, 0, -0.145, 0);
@@ -432,8 +531,9 @@ function buildBody(f: PartFactory, m: Materials): BodyRig {
   return { hips, spine, chest, head, armL, armR, legL, legR };
 }
 
-// ---------------------------------------------------------------------------------------------
-// Weapons. Weapon space: origin = firing-hand palm on the grip, +Z = barrel, -X = right side.
+// --------------------------------------------------------------------------
+// Weapons. Weapon space: origin = firing-hand palm on the grip, +Z = barrel,
+// -X = right side.
 
 /** Grip placement relative to the shoulder centre (model axes) + pitch/yaw/roll (YXZ). */
 interface Pose {
@@ -441,7 +541,14 @@ interface Pose {
   rot: THREE.Vector3;
 }
 
-const pose = (x: number, y: number, z: number, pitch: number, yaw: number, roll: number): Pose => ({
+const pose = (
+  x: number,
+  y: number,
+  z: number,
+  pitch: number,
+  yaw: number,
+  roll: number,
+): Pose => ({
   pos: new THREE.Vector3(x, y, z),
   rot: new THREE.Vector3(pitch, yaw, roll),
 });
@@ -455,7 +562,14 @@ interface RecoilProfile {
   torso: number;
 }
 
-type AnchorName = "muzzle" | "ejection" | "support" | "well" | "wellOut" | "bolt" | "boltBack";
+type AnchorName =
+  | "muzzle"
+  | "ejection"
+  | "support"
+  | "well"
+  | "wellOut"
+  | "bolt"
+  | "boltBack";
 type ReloadTarget = Exclude<AnchorName, "muzzle" | "ejection"> | "pouch";
 type TimeWindow = readonly [number, number];
 
@@ -470,7 +584,7 @@ interface WeaponRig {
   /** Magazine on the gun, hidden while it is out during a reload. */
   mag: THREE.Object3D | null;
   magOut: TimeWindow | null;
-  /** Mag / shell carried by the support hand (kept upright in weapon axes, palm at its base). */
+  /** Mag / shell in the support hand (upright in weapon axes, palm at its base). */
   handItem: THREE.Object3D;
   handItemWindows: TimeWindow[];
   pump: THREE.Object3D | null;
@@ -491,7 +605,8 @@ function inWindow(t: number, w: TimeWindow): boolean {
 function buildCarbine(f: PartFactory, m: Materials): WeaponRig {
   const g = new THREE.Group();
   const bore = 0.095;
-  f.box(g, m.gunPolymer, 0.032, 0.11, 0.05, 0, -0.01, -0.005).rotation.x = -0.28;
+  f.box(g, m.gunPolymer, 0.032, 0.11, 0.05, 0, -0.01, -0.005).rotation.x =
+    -0.28;
   f.box(g, m.gunMetal, 0.05, 0.06, 0.2, 0, 0.05, 0.05);
   f.box(g, m.gunMetal, 0.056, 0.05, 0.33, 0, bore + 0.01, 0.08);
   f.box(g, m.gunPolymer, 0.06, 0.066, 0.2, 0, bore - 0.008, 0.33);
@@ -509,7 +624,8 @@ function buildCarbine(f: PartFactory, m: Materials): WeaponRig {
   mag.rotation.x = -0.25;
 
   const handItem = new THREE.Group();
-  f.box(handItem, m.gunPolymer, 0.03, 0.17, 0.068, 0, 0.05, -0.015).rotation.x = -0.25;
+  f.box(handItem, m.gunPolymer, 0.03, 0.17, 0.068, 0, 0.05, -0.015).rotation.x =
+    -0.25;
 
   return {
     id: "carbine",
@@ -555,13 +671,20 @@ function buildCarbine(f: PartFactory, m: Materials): WeaponRig {
     },
     blade: -0.34,
     cheek: 0.12,
-    recoil: { back: 0.022, rise: 0.006, pitch: -0.045, yaw: 0.012, torso: 0.006 },
+    recoil: {
+      back: 0.022,
+      rise: 0.006,
+      pitch: -0.045,
+      yaw: 0.012,
+      torso: 0.006,
+    },
   };
 }
 
 function buildPistol(f: PartFactory, m: Materials): WeaponRig {
   const g = new THREE.Group();
-  f.box(g, m.gunPolymer, 0.03, 0.1, 0.045, 0, -0.005, -0.005).rotation.x = -0.22;
+  f.box(g, m.gunPolymer, 0.03, 0.1, 0.045, 0, -0.005, -0.005).rotation.x =
+    -0.22;
   f.box(g, m.gunPolymer, 0.028, 0.028, 0.165, 0, 0.05, 0.045);
   f.box(g, m.gunPolymer, 0.01, 0.02, 0.045, 0, 0.022, 0.055);
   const slide = new THREE.Group();
@@ -573,7 +696,8 @@ function buildPistol(f: PartFactory, m: Materials): WeaponRig {
   const mag = f.box(g, m.gunMetal, 0.028, 0.02, 0.042, 0, -0.06, -0.017);
 
   const handItem = new THREE.Group();
-  f.box(handItem, m.gunMetal, 0.024, 0.1, 0.035, 0, 0.055, 0.005).rotation.x = -0.22;
+  f.box(handItem, m.gunMetal, 0.024, 0.1, 0.035, 0, 0.055, 0.005).rotation.x =
+    -0.22;
 
   return {
     id: "pistol",
@@ -626,7 +750,8 @@ function buildPistol(f: PartFactory, m: Materials): WeaponRig {
 function buildShotgun(f: PartFactory, m: Materials): WeaponRig {
   const g = new THREE.Group();
   const bore = 0.1;
-  f.box(g, m.gunPolymer, 0.034, 0.105, 0.05, 0, -0.01, -0.005).rotation.x = -0.3;
+  f.box(g, m.gunPolymer, 0.034, 0.105, 0.05, 0, -0.01, -0.005).rotation.x =
+    -0.3;
   f.box(g, m.gunMetal, 0.052, 0.085, 0.24, 0, 0.075, 0.075);
   f.cylinder(g, m.gunMetal, 0.016, 0.48, 0, bore, 0.43, "z");
   f.cylinder(g, m.gunMetal, 0.015, 0.4, 0, 0.058, 0.39, "z");
@@ -645,7 +770,8 @@ function buildShotgun(f: PartFactory, m: Materials): WeaponRig {
   pump.position.set(0, 0.058, 0.36);
   g.add(pump);
   f.cylinder(pump, m.gunPolymer, 0.028, 0.17, 0, 0, 0, "z");
-  for (const z of [-0.05, 0, 0.05]) f.cylinder(pump, m.gunMetal, 0.03, 0.012, 0, 0, z, "z");
+  for (const z of [-0.05, 0, 0.05])
+    f.cylinder(pump, m.gunMetal, 0.03, 0.012, 0, 0, z, "z");
 
   const handItem = new THREE.Group();
   f.cylinder(handItem, m.shell, 0.012, 0.06, 0, 0.035, 0);
@@ -706,10 +832,11 @@ const IDLE_STATE: CharacterAnimState = {
 };
 
 /**
- * Low-poly soldier built from primitives, with procedural animation and three weapon meshes.
- * `root` sits at the feet and faces local +Z; Player sets root.position / root.rotation.y.
- * Legs and arms are solved with two-bone IK: feet follow a distance-driven gait, hands stay on
- * the weapon, which is posed in model space relative to the chest.
+ * Low-poly soldier built from primitives, with procedural animation and three
+ * weapon meshes. `root` sits at the feet and faces local +Z; Player sets
+ * root.position / root.rotation.y. Legs and arms use two-bone IK: the feet follow
+ * a distance-driven gait, the hands stay on the weapon, which is posed in model
+ * space relative to the chest.
  */
 export class CharacterModel {
   readonly root = new THREE.Group();
@@ -839,25 +966,38 @@ export class CharacterModel {
   dispose(): void {
     this.root.removeFromParent();
     this.parts.dispose();
-    // The camo texture is shared and cached by textures.ts, so only materials are disposed.
+    // The camo texture is cached and shared by textures.ts: keep it.
     for (const mat of Object.values(this.mats)) mat.dispose();
   }
 
-  // -------------------------------------------------------------------------------------------
+  // ------------------------------------------------------------------------
   // Per-frame state
 
   private updateBlends(dt: number, a: CharacterAnimState): void {
     const s = a.state;
     const lowered = a.weaponLowered || s === "tactical" || s === "vault";
     this.aimW = damp(this.aimW, a.aiming && !lowered ? 1 : 0, 14, dt);
-    this.lowerW = damp(this.lowerW, lowered ? 1 : s === "run" && !a.aiming ? 0.25 : 0, 9, dt);
+    this.lowerW = damp(
+      this.lowerW,
+      lowered ? 1 : s === "run" && !a.aiming ? 0.25 : 0,
+      9,
+      dt,
+    );
     this.reloadW = damp(this.reloadW, a.reloading ? 1 : 0, 10, dt);
     const crouched = a.crouched || s === "crouch" || s === "crouchWalk";
     this.crouchW = damp(this.crouchW, crouched ? 1 : 0, 9, dt);
-    this.slideW = damp(this.slideW, s === "slide" ? 1 : 0, 12, dt);
+    // The slide pose starts easing out before the slide hands over to crouch.
+    const slideEnd = smooth01((a.slideProgress - 0.65) / 0.35);
+    this.slideW = damp(
+      this.slideW,
+      s === "slide" ? 1 - 0.6 * slideEnd : 0,
+      12,
+      dt,
+    );
     this.vaultW = damp(this.vaultW, s === "vault" ? 1 : 0, 16, dt);
     this.tacticalW = damp(this.tacticalW, s === "tactical" ? 1 : 0, 8, dt);
-    const tuck = s === "vault" ? Math.sin(Math.PI * clamp01(a.vaultProgress)) : 0;
+    const tuck =
+      s === "vault" ? Math.sin(Math.PI * clamp01(a.vaultProgress)) : 0;
     this.vaultTuck = damp(this.vaultTuck, tuck, 20, dt);
     this.switchDip = damp(this.switchDip, 0, 7, dt);
     if (a.reloading) this.reloadProgress = clamp01(a.reloadProgress);
@@ -865,7 +1005,9 @@ export class CharacterModel {
     // Turning fast makes the weapon trail slightly behind the body.
     const yaw = this.root.rotation.y;
     const yawRate =
-      dt > 0 && !Number.isNaN(this.prevYaw) ? wrapAngle(yaw - this.prevYaw) / dt : 0;
+      dt > 0 && !Number.isNaN(this.prevYaw)
+        ? wrapAngle(yaw - this.prevYaw) / dt
+        : 0;
     this.prevYaw = yaw;
     const lag = clamp(-yawRate * 0.02, -0.18, 0.18) * (1 - 0.6 * this.aimW);
     this.turnLag = damp(this.turnLag, lag, 12, dt);
@@ -883,8 +1025,18 @@ export class CharacterModel {
     const prevZ = this.velLocal.z;
     this.velLocal.lerp(_v1, 1 - Math.exp(-12 * dt));
     if (dt > 0) {
-      this.accelFwd = damp(this.accelFwd, (this.velLocal.z - prevZ) / dt, 8, dt);
-      this.accelSide = damp(this.accelSide, (this.velLocal.x - prevX) / dt, 8, dt);
+      this.accelFwd = damp(
+        this.accelFwd,
+        (this.velLocal.z - prevZ) / dt,
+        8,
+        dt,
+      );
+      this.accelSide = damp(
+        this.accelSide,
+        (this.velLocal.x - prevX) / dt,
+        8,
+        dt,
+      );
     }
     const vLen = this.velLocal.length();
     if (vLen > 0.05) this.gaitDir.copy(this.velLocal).divideScalar(vLen);
@@ -892,26 +1044,40 @@ export class CharacterModel {
     const legsFree = a.state !== "slide" && a.state !== "vault";
     this.gaitW = damp(this.gaitW, legsFree ? clamp01(speed / 0.8) : 0, 9, dt);
     this.runW = damp(this.runW, clamp01((speed - 3.8) / 2.4), 6, dt);
-    // Stance shrinks into a running flight phase. Strides are shorter sideways and when slow
-    // (short shuffle steps); cadence follows so planted feet never slide.
-    this.stanceFrac = damp(this.stanceFrac, clamp(0.64 - 0.065 * speed, 0.2, 0.62), 5, dt);
-    const strideScale = Math.max(clamp01(vLen / 1.2), 0.25) * (1 - 0.4 * Math.abs(this.gaitDir.x));
-    this.stride = (0.3 + 0.1 * this.crouchW + 0.03 * this.runW) * strideScale;
-    const cycle = (2 * this.stride) / this.stanceFrac;
+    // Stance shrinks into a running flight phase. Strides are shorter sideways
+    // and when slow (shuffle steps); cadence follows so planted feet hold still.
+    this.stanceFrac = damp(
+      this.stanceFrac,
+      clamp(0.64 - 0.065 * speed, 0.2, 0.62),
+      5,
+      dt,
+    );
+    const baseStride =
+      (0.3 + 0.1 * this.crouchW + 0.03 * this.runW) *
+      (1 - 0.4 * Math.abs(this.gaitDir.x));
+    // Strides fade out near standstill so direction flips never jump the feet.
+    this.stride = baseStride * clamp01(vLen / 1.2);
+    const cycle =
+      (2 * Math.max(this.stride, 0.25 * baseStride)) / this.stanceFrac;
     this.phase = (this.phase + (speed * dt) / cycle) % 1;
-    this.liftHeight = (0.09 + 0.14 * this.runW + 0.05 * this.tacticalW) * (1 - 0.4 * this.crouchW);
+    this.liftHeight =
+      (0.09 + 0.14 * this.runW + 0.05 * this.tacticalW) *
+      (1 - 0.4 * this.crouchW);
 
-    // Strafing turns the pelvis toward the movement; backpedalling turns it the other way.
+    // Strafing turns the pelvis toward the movement; backpedalling, the other way.
     const right = -this.gaitDir.x;
-    const strafe = vLen > 0.3 ? -0.45 * right * (this.gaitDir.z >= -0.15 ? 1 : -1) : 0;
+    const strafe =
+      vLen > 0.3 ? -0.45 * right * (this.gaitDir.z >= -0.15 ? 1 : -1) : 0;
     this.strafeYaw = damp(this.strafeYaw, strafe * this.gaitW, 6, dt);
   }
 
   private updateActions(dt: number, a: CharacterAnimState): void {
-    if (a.shotsFired > 0) this.applyRecoil(a.shotsFired);
-    // Shotgun: rack the pump once the last shell is in.
-    if (this.wasReloading && !a.reloading && this.weapon.pump) this.pumpClock = -0.05;
+    // Shotgun: rack the pump once the last shell is in (a shot below overrides it).
+    if (this.wasReloading && !a.reloading && this.weapon.pump) {
+      this.pumpClock = -0.05;
+    }
     this.wasReloading = a.reloading;
+    if (a.shotsFired > 0) this.applyRecoil(a.shotsFired);
 
     const prevPump = this.pumpClock;
     this.pumpClock += dt;
@@ -940,7 +1106,7 @@ export class CharacterModel {
     if (this.weapon.pump) this.pumpClock = -PUMP_DELAY_AFTER_SHOT;
   }
 
-  // -------------------------------------------------------------------------------------------
+  // ------------------------------------------------------------------------
   // Posing
 
   private poseTorso(): void {
@@ -950,7 +1116,11 @@ export class CharacterModel {
     const t = this.time;
 
     // Two dips per cycle, at each foot strike.
-    const bob = -(0.02 + 0.025 * this.runW) * Math.cos(2 * p) * g * (1 - 0.5 * this.crouchW);
+    const bob =
+      -(0.02 + 0.025 * this.runW) *
+      Math.cos(2 * p) *
+      g *
+      (1 - 0.5 * this.crouchW);
     const drop = Math.max(CROUCH_DROP * this.crouchW, SLIDE_DROP * this.slideW);
     hips.position.set(
       0.012 * Math.sin(t * 0.6) * (1 - g),
@@ -963,12 +1133,14 @@ export class CharacterModel {
         bob,
       -0.06 * this.crouchW - 0.04 * this.slideW,
     );
-    const hipsYaw = this.strafeYaw - (0.06 + 0.08 * this.runW) * Math.cos(p) * g;
-    const hipsPitch = 0.12 * this.crouchW - 0.3 * this.slideW + 0.05 * this.runW;
+    const hipsYaw =
+      this.strafeYaw - (0.06 + 0.08 * this.runW) * Math.cos(p) * g;
+    const hipsPitch =
+      0.12 * this.crouchW - 0.3 * this.slideW + 0.05 * this.runW;
     const hipsRoll = 0.04 * Math.sin(p) * g;
     hips.rotation.set(hipsPitch, hipsYaw, hipsRoll);
 
-    // Lean into speed and acceleration; aiming straightens up; sliding leans back.
+    // Lean into speed and acceleration; aiming straightens up; slides lean back.
     let lean =
       0.05 +
       clamp(0.022 * this.velLocal.z, -0.08, 0.17) +
@@ -979,15 +1151,23 @@ export class CharacterModel {
     lean = lean * (1 - 0.6 * this.aimW) + 0.04 * this.aimW;
     lean -= 0.6 * this.slideW + this.kickTorso.value;
     this.lean = lean;
-    const sideLean = clamp(-0.02 * this.velLocal.x - 0.004 * this.accelSide, -0.15, 0.15);
+    const sideLean = clamp(
+      -0.02 * this.velLocal.x - 0.004 * this.accelSide,
+      -0.15,
+      0.15,
+    );
     const breath = Math.sin(t * 1.7) * 0.012 * (1 - 0.5 * g);
-    // Blade the shoulders behind the weapon; shoulders counter-swing against the hips.
+    // Blade the shoulders behind the weapon; they counter-swing against the hips.
     const twist =
       this.weapon.blade * (0.4 + 0.6 * this.aimW) * (1 - 0.8 * this.lowerW) +
       (0.08 + 0.1 * this.runW) * Math.cos(p) * g * (1 - 0.5 * this.aimW) +
       0.5 * this.turnLag;
     const bend = lean - hipsPitch;
-    spine.rotation.set(bend * 0.5, -hipsYaw * 0.6 + twist * 0.4, sideLean * 0.5 - hipsRoll * 0.6);
+    spine.rotation.set(
+      bend * 0.5,
+      -hipsYaw * 0.6 + twist * 0.4,
+      sideLean * 0.5 - hipsRoll * 0.6,
+    );
     chest.rotation.set(
       bend * 0.5 - breath,
       -hipsYaw * 0.4 + twist * 0.6,
@@ -997,16 +1177,27 @@ export class CharacterModel {
     hips.updateMatrix();
     spine.updateMatrix();
     chest.updateMatrix();
-    this.chestMatrix.multiplyMatrices(hips.matrix, spine.matrix).multiply(chest.matrix);
-    this.chestQuat.copy(hips.quaternion).multiply(spine.quaternion).multiply(chest.quaternion);
+    this.chestMatrix
+      .multiplyMatrices(hips.matrix, spine.matrix)
+      .multiply(chest.matrix);
+    this.chestQuat
+      .copy(hips.quaternion)
+      .multiply(spine.quaternion)
+      .multiply(chest.quaternion);
   }
 
   private poseWeapon(dt: number, a: CharacterAnimState): void {
     const w = this.weapon;
     const P = w.poses;
-    _v1.copy(P.ready.pos).lerp(P.aim.pos, this.aimW).lerp(P.reload.pos, this.reloadW);
+    _v1
+      .copy(P.ready.pos)
+      .lerp(P.aim.pos, this.aimW)
+      .lerp(P.reload.pos, this.reloadW);
     _v1.lerp(P.lowered.pos, this.lowerW);
-    _v2.copy(P.ready.rot).lerp(P.aim.rot, this.aimW).lerp(P.reload.rot, this.reloadW);
+    _v2
+      .copy(P.ready.rot)
+      .lerp(P.aim.rot, this.aimW)
+      .lerp(P.reload.rot, this.reloadW);
     _v2.lerp(P.lowered.rot, this.lowerW);
     // Weapon switch: dip and raise.
     _v1.y -= 0.22 * this.switchDip;
@@ -1028,26 +1219,39 @@ export class CharacterModel {
     const wr = this.weaponRoot;
     wr.rotation.set(
       this.poseRot.x + this.kickPitch.value + 0.01 * Math.sin(t * 1.3) * still,
-      this.poseRot.y + this.turnLag + this.kickYaw.value + 0.008 * Math.sin(t * 0.7) * still,
+      this.poseRot.y +
+        this.turnLag +
+        this.kickYaw.value +
+        0.008 * Math.sin(t * 0.7) * still,
       this.poseRot.z + 0.04 * Math.sin(p) * stepAmp,
     );
     _v3.set(0, SHOULDER_Y, 0).applyMatrix4(this.chestMatrix);
-    _v4.set(0, this.kickRise.value, -this.kickBack.value).applyQuaternion(wr.quaternion);
+    _v4
+      .set(0, this.kickRise.value, -this.kickBack.value)
+      .applyQuaternion(wr.quaternion);
     wr.position.copy(_v3).add(this.posePos).add(_v4);
-    wr.position.x += 0.005 * Math.sin(t * 0.9) * still + 0.012 * Math.sin(p) * stepAmp;
-    wr.position.y += 0.004 * Math.sin(t * 1.7) * still + 0.01 * Math.cos(2 * p) * stepAmp;
+    wr.position.x +=
+      0.005 * Math.sin(t * 0.9) * still + 0.012 * Math.sin(p) * stepAmp;
+    wr.position.y +=
+      0.004 * Math.sin(t * 1.7) * still + 0.01 * Math.cos(2 * p) * stepAmp;
 
     if (w.pump) {
-      w.pump.position.z = w.movingPartBase - PUMP_TRAVEL * cycleTravel(this.pumpClock / PUMP_TIME, 0.4);
+      w.pump.position.z =
+        w.movingPartBase -
+        PUMP_TRAVEL * cycleTravel(this.pumpClock / PUMP_TIME, 0.4);
     }
     if (w.slide) {
-      w.slide.position.z = w.movingPartBase - SLIDE_TRAVEL * cycleTravel(this.slideClock / SLIDE_TIME, 0.3);
+      w.slide.position.z =
+        w.movingPartBase -
+        SLIDE_TRAVEL * cycleTravel(this.slideClock / SLIDE_TIME, 0.3);
     }
     const rp = this.reloadProgress;
-    if (w.mag) w.mag.visible = !(a.reloading && w.magOut && inWindow(rp, w.magOut));
+    if (w.mag) {
+      w.mag.visible = !(a.reloading && w.magOut && inWindow(rp, w.magOut));
+    }
     let holding = false;
     if (a.reloading) {
-      for (let i = 0; i < w.handItemWindows.length; i++) holding ||= inWindow(rp, w.handItemWindows[i]);
+      for (const win of w.handItemWindows) holding ||= inWindow(rp, win);
     }
     w.handItem.visible = holding;
   }
@@ -1056,7 +1260,9 @@ export class CharacterModel {
     const { armL, armR } = this.body;
     _grip.copy(this.weaponRoot.position);
     this.rootPosition(this.weapon.anchors.support, _support);
-    if (this.reloadW > 0.001) _support.lerp(this.reloadTarget(_target), this.reloadW);
+    if (this.reloadW > 0.001) {
+      _support.lerp(this.reloadTarget(_target), this.reloadW);
+    }
 
     _shoulderL.set(SHOULDER_X, SHOULDER_Y, 0).applyMatrix4(this.chestMatrix);
     _shoulderR.set(-SHOULDER_X, SHOULDER_Y, 0).applyMatrix4(this.chestMatrix);
@@ -1065,7 +1271,9 @@ export class CharacterModel {
     const pumpArm = this.tacticalW * (1 - this.reloadW);
     if (pumpArm > 0.001) {
       const swing = -Math.cos(this.phase * TAU) * this.gaitW;
-      _target.set(0.04, -0.4 + 0.12 * Math.max(0, swing), 0.1 + 0.24 * swing).add(_shoulderL);
+      _target
+        .set(0.04, -0.4 + 0.12 * Math.max(0, swing), 0.1 + 0.24 * swing)
+        .add(_shoulderL);
       _support.lerp(_target, pumpArm);
     }
     // Vault: support hand reaches down to plant on the obstacle.
@@ -1074,7 +1282,7 @@ export class CharacterModel {
       _support.lerp(_target, this.vaultW);
     }
 
-    // Smooth in weapon space: rigid with the gun, but switching anchors or weapons never pops.
+    // Smooth in weapon space: rigid with the gun, but changing anchors never pops.
     const wr = this.weaponRoot;
     wr.updateMatrix();
     _target.copy(_support).applyMatrix4(_invWeapon.copy(wr.matrix).invert());
@@ -1089,8 +1297,11 @@ export class CharacterModel {
     _pole.set(0.65, -0.75, -0.1).lerp(_v1.set(0.3, -0.95, 0.05), this.aimW);
     _pole.lerp(_v1.set(0.3, -0.3, -0.9), pumpArm);
     this.solveLimb(armL, this.chestQuat, _shoulderL, _support, _pole);
-    // The hand has no local rotation, so _qLower is also the hand's model-space rotation.
-    this.weapon.handItem.quaternion.copy(_qLower).invert().multiply(this.weaponRoot.quaternion);
+    // Hands have no local rotation: _qLower is also the hand's model rotation.
+    this.weapon.handItem.quaternion
+      .copy(_qLower)
+      .invert()
+      .multiply(this.weaponRoot.quaternion);
   }
 
   private poseLegs(): void {
@@ -1098,7 +1309,7 @@ export class CharacterModel {
     const g = this.gaitW;
     const sf = this.stanceFrac;
     const half = this.stride;
-    // Swing tangent matching the planted foot's backward motion (capped to limit overshoot).
+    // Swing tangent matching the planted foot's motion (capped against overshoot).
     const swingSlope = -Math.min((2 * (1 - sf)) / sf, 4) * half;
     const stepToe = g * (0.6 + 0.6 * this.runW);
     const crouchRest = this.crouchW * (1 - g);
@@ -1107,7 +1318,7 @@ export class CharacterModel {
       const side = i === 0 ? 1 : -1;
       const leg = i === 0 ? legL : legR;
 
-      // Gait foot: planted while in stance (moves back at body speed), arcs forward in swing.
+      // Gait foot: planted in stance (moves back at body speed), arcs in swing.
       const p = (this.phase + i * 0.5) % 1;
       let along: number;
       let lift: number;
@@ -1119,19 +1330,35 @@ export class CharacterModel {
         lift = 0.05 * heel;
         toe = 0.4 * heel;
       } else {
-        // Hermite back → front: the foot trails after toe-off and paws back before landing.
+        // Hermite back → front: trails after toe-off, paws back before landing.
         const u = (p - sf) / (1 - sf);
-        along = half * (6 * u * u - 4 * u * u * u - 1) + swingSlope * (u * (1 - u) * (1 - 2 * u));
+        along =
+          half * (6 * u * u - 4 * u * u * u - 1) +
+          swingSlope * (u * (1 - u) * (1 - 2 * u));
         lift = this.liftHeight * Math.sin(Math.PI * u);
         toe = (0.55 * (1 - u) - 0.35 * u) * Math.sin(Math.PI * u);
       }
-      _v1.set(side * 0.11, ANKLE_HEIGHT + lift, 0).addScaledVector(this.gaitDir, along);
+      _v1
+        .set(side * 0.11, ANKLE_HEIGHT + lift, 0)
+        .addScaledVector(this.gaitDir, along);
 
-      // Rest stance: staggered, bladed when aiming, wide with the rear heel up when crouched.
-      const standZ = THREE.MathUtils.lerp(side > 0 ? 0.04 : -0.06, side > 0 ? 0.12 : -0.12, this.aimW);
-      const restZ = THREE.MathUtils.lerp(standZ, side > 0 ? 0.16 : -0.2, this.crouchW);
+      // Rest stance: staggered, bladed when aiming, wide + rear heel up crouched.
+      const standZ = THREE.MathUtils.lerp(
+        side > 0 ? 0.04 : -0.06,
+        side > 0 ? 0.12 : -0.12,
+        this.aimW,
+      );
+      const restZ = THREE.MathUtils.lerp(
+        standZ,
+        side > 0 ? 0.16 : -0.2,
+        this.crouchW,
+      );
       const rearHeel = side < 0 ? crouchRest : 0;
-      _v2.set(side * (0.12 + 0.04 * this.crouchW), ANKLE_HEIGHT + 0.07 * rearHeel, restZ);
+      _v2.set(
+        side * (0.12 + 0.04 * this.crouchW),
+        ANKLE_HEIGHT + 0.07 * rearHeel,
+        restZ,
+      );
       _target.lerpVectors(_v2, _v1, g);
       let pitch = toe * stepToe + 0.45 * rearHeel;
 
@@ -1145,7 +1372,11 @@ export class CharacterModel {
       // Vault: legs tucked up and swung to the right.
       const tuck = this.vaultW * this.vaultTuck;
       if (tuck > 0.001) {
-        _v3.set(side * 0.1 - 0.12, ANKLE_HEIGHT + 0.38, side > 0 ? 0.12 : -0.05);
+        _v3.set(
+          side * 0.1 - 0.12,
+          ANKLE_HEIGHT + 0.38,
+          side > 0 ? 0.12 : -0.05,
+        );
         _target.lerp(_v3, tuck);
         pitch = THREE.MathUtils.lerp(pitch, 0.6, tuck);
       }
@@ -1157,20 +1388,27 @@ export class CharacterModel {
       _joint.set(side * HIP_JOINT_X, HIP_JOINT_Y, 0).applyMatrix4(hips.matrix);
       this.solveLimb(leg, hips.quaternion, _joint, _target, _pole);
 
-      // Feet stay flat to the floor (toes slightly out) apart from the step roll.
-      _qTmp.setFromEuler(_euler.set(pitch, side * 0.1 + 0.4 * this.strafeYaw, 0));
+      // Feet stay flat (toes slightly out) apart from the step roll.
+      _qTmp.setFromEuler(
+        _euler.set(pitch, side * 0.1 + 0.4 * this.strafeYaw, 0),
+      );
       leg.end.quaternion.copy(_qLower).invert().multiply(_qTmp);
     }
   }
 
   private poseHead(): void {
-    // Look straight ahead (the facing is the aim), dip onto the sights, lead turns a little.
+    // Look ahead (facing = aim), dip onto the sights, lead turns a little.
     const pitch = 0.05 + 0.3 * this.lean + 0.18 * this.aimW;
-    _qTmp.setFromEuler(_euler.set(pitch, -0.6 * this.turnLag, this.weapon.cheek * this.aimW));
+    _qTmp.setFromEuler(
+      _euler.set(pitch, -0.6 * this.turnLag, this.weapon.cheek * this.aimW),
+    );
     this.body.head.quaternion.copy(this.chestQuat).invert().multiply(_qTmp);
   }
 
-  /** IK a limb toward a model-space target; writes local rotations (leaves the lower bone's model-space rotation in _qLower). */
+  /**
+   * IK a limb toward a model-space target and write its local rotations.
+   * Leaves the lower bone's model-space rotation in _qLower.
+   */
   private solveLimb(
     limb: Limb,
     parentQuat: THREE.Quaternion,
@@ -1178,7 +1416,15 @@ export class CharacterModel {
     target: THREE.Vector3,
     pole: THREE.Vector3,
   ): void {
-    solveTwoBone(joint, target, pole, limb.upperLen, limb.lowerLen, _qUpper, _qLower);
+    solveTwoBone(
+      joint,
+      target,
+      pole,
+      limb.upperLen,
+      limb.lowerLen,
+      _qUpper,
+      _qLower,
+    );
     limb.upper.quaternion.copy(parentQuat).invert().multiply(_qUpper);
     limb.lower.quaternion.copy(_qUpper).invert().multiply(_qLower);
   }
@@ -1198,16 +1444,20 @@ export class CharacterModel {
   }
 
   private reloadPoint(target: ReloadTarget, out: THREE.Vector3): THREE.Vector3 {
-    if (target === "pouch") return out.copy(this.weapon.pouch).applyMatrix4(this.chestMatrix);
+    if (target === "pouch") {
+      return out.copy(this.weapon.pouch).applyMatrix4(this.chestMatrix);
+    }
     return this.rootPosition(this.weapon.anchors[target], out);
   }
 
   /** Position of `obj` in root (model) space. */
   private rootPosition(obj: THREE.Object3D, out: THREE.Vector3): THREE.Vector3 {
     out.set(0, 0, 0);
-    for (let o: THREE.Object3D | null = obj; o && o !== this.root; o = o.parent) {
+    let o: THREE.Object3D | null = obj;
+    while (o && o !== this.root) {
       o.updateMatrix();
       out.applyMatrix4(o.matrix);
+      o = o.parent;
     }
     return out;
   }
