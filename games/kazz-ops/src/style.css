@@ -1,0 +1,52 @@
+/* Base layout. UI modules add their own rules below (HUD, tune panel, touch controls). */
+:root {
+  --hud-fg: rgba(236, 242, 250, 0.92);
+  --hud-dim: rgba(200, 212, 228, 0.6);
+  --hud-accent: #39d0c0;
+  --hud-warn: #ff8a3d;
+  --hud-bg: rgba(14, 19, 27, 0.72);
+  --hud-font: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #222b38;
+  color: var(--hud-fg);
+  font-family: var(--hud-font);
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app,
+#ui {
+  position: fixed;
+  inset: 0;
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: none;
+}
+
+#ui {
+  pointer-events: none;
+}
+
+.fatal {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+  font-size: 16px;
+  pointer-events: auto;
+}

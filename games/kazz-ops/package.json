@@ -1,0 +1,24 @@
+{
+  "name": "kazz-ops",
+  "private": true,
+  "version": "0.1.0",
+  "description": "KAZZ OPS - a top-down tactical shooter sandbox with physics props (Three.js + cannon-es).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit",
+    "smoke": "node scripts/smoke.cjs"
+  },
+  "dependencies": {
+    "cannon-es": "0.20.0",
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.7.3",
+    "vite": "6.4.6",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}
