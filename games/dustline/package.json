@@ -1,0 +1,22 @@
+{
+  "name": "dustline",
+  "private": true,
+  "version": "0.1.0",
+  "description": "DUSTLINE - an arcade desert rally level: dunes, drifting, jumps, checkpoints (Three.js).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.170.0",
+    "typescript": "5.7.3",
+    "vite": "6.4.6",
+    "vite-plugin-singlefile": "2.3.0"
+  }
+}
