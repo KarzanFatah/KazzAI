@@ -1,5 +1,6 @@
 import type * as THREE from "three";
 import type { HitInfo, PropKind, Surface, WeaponDef } from "./types";
+import type { ZombieKind } from "./zombies";
 
 /**
  * Every gameplay event. Producers emit, any system may listen (audio, HUD, camera shake...).
@@ -35,6 +36,24 @@ export interface GameEventMap {
   tacticalStart: Record<string, never>;
   staminaExhausted: Record<string, never>;
   cameraMode: { name: string };
+  /** A bullet hit a zombie (not necessarily fatal). */
+  zombieHit: { position: THREE.Vector3; headshot: boolean };
+  zombieKilled: {
+    position: THREE.Vector3;
+    headshot: boolean;
+    kind: ZombieKind;
+    /** Kills this session. */
+    total: number;
+  };
+  /** Ambient moan from a zombie (audio picks a few, by distance). */
+  zombieGroan: { position: THREE.Vector3; kind: ZombieKind };
+  /** A zombie swings at the player (the hit itself is playerHurt). */
+  zombieAttack: { position: THREE.Vector3 };
+  playerHurt: { amount: number; health: number; from: THREE.Vector3 };
+  playerDied: { wave: number; kills: number };
+  waveStart: { wave: number; count: number };
+  waveCleared: { wave: number };
+  pickup: { kind: "ammo" | "health"; position: THREE.Vector3 };
   /** Short message for the HUD toast line. */
   toast: { text: string };
   reset: Record<string, never>;

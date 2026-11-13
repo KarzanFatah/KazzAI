@@ -251,6 +251,10 @@ export class Player {
   facing = Math.PI;
   state: MoveState = "idle";
   stamina = 100;
+  readonly maxHealth = 100;
+  health = 100;
+  /** True after health reached 0 until the next reset (F9 / restart). */
+  dead = false;
   /** True after stamina hit 0 until it recovers past tuning.staminaRecoverThreshold. */
   exhausted = false;
   crouched = false;
@@ -375,7 +379,27 @@ export class Player {
     this.model.update(dt, this.buildAnimState());
   }
 
+  /** Take damage from something at `from` (zombie swipe, explosion). Emits playerHurt/playerDied. */
+  damage(amount: number, from: THREE.Vector3): void {
+    if (this.dead || amount <= 0) return;
+    this.health = Math.max(0, this.health - amount);
+    this.ctx.events.emit("playerHurt", { amount, health: this.health, from });
+    if (this.health <= 0) {
+      this.dead = true;
+      this.ctx.events.emit("playerDied", {
+        wave: this.ctx.zombies.wave,
+        kills: this.ctx.stats.kills,
+      });
+    }
+  }
+
+  heal(amount: number): void {
+    if (!this.dead) this.health = Math.min(this.maxHealth, this.health + amount);
+  }
+
   reset(spawn: THREE.Vector3, yaw: number): void {
+    this.health = this.maxHealth;
+    this.dead = false;
     this.spawn.copy(spawn);
     this.spawnYaw = yaw;
     const body = this.body;

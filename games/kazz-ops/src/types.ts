@@ -20,6 +20,7 @@ import type { World } from "./world";
 import type { Player } from "./player";
 import type { WeaponSystem } from "./weapon";
 import type { Hud } from "./hud";
+import type { ZombieHorde } from "./zombies";
 
 /** Material class of whatever a bullet hit. Drives impact FX + sounds. */
 export type Surface =
@@ -30,6 +31,7 @@ export type Surface =
   | "plastic" // orange water-filled barriers, cones
   | "rubber" // tyres
   | "fabric" // sandbags
+  | "flesh" // zombies
   | "ground"; // the floor
 
 export type PropKind =
@@ -143,6 +145,8 @@ export interface GameStats {
   hits: number; // bullets that hit any prop (not the floor)
   targetsDropped: number;
   barrelsExploded: number;
+  kills: number;
+  headshots: number;
   fps: number;
 }
 
@@ -154,7 +158,7 @@ export interface GameClock {
 /**
  * Shared bag of systems. Built by Game in this order:
  * tuning, events, renderer, scene, canvas, uiRoot, clock, stats, physics, input, cameraRig, fx, audio,
- * world, player, weapons, hud. A constructor may only touch fields created before it;
+ * world, player, weapons, zombies, hud. A constructor may only touch fields created before it;
  * anything else must be read later (in update/build/reset).
  */
 export interface GameContext {
@@ -175,5 +179,6 @@ export interface GameContext {
   world: World;
   player: Player;
   weapons: WeaponSystem;
+  zombies: ZombieHorde;
   hud: Hud;
 }

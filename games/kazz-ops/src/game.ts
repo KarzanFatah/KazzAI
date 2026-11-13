@@ -13,6 +13,7 @@ import { TunePanel } from "./tune";
 import type { GameContext } from "./types";
 import { WeaponSystem } from "./weapon";
 import { World } from "./world";
+import { ZombieHorde } from "./zombies";
 
 const MAX_FRAME_DT = 1 / 20;
 
@@ -59,6 +60,8 @@ export class Game {
         hits: 0,
         targetsDropped: 0,
         barrelsExploded: 0,
+        kills: 0,
+        headshots: 0,
         fps: 0,
       },
     } as Partial<GameContext> as GameContext;
@@ -72,6 +75,7 @@ export class Game {
     ctx.world = new World(ctx);
     ctx.player = new Player(ctx);
     ctx.weapons = new WeaponSystem(ctx);
+    ctx.zombies = new ZombieHorde(ctx);
     ctx.hud = new Hud(ctx);
     this.tunePanel = new TunePanel(ctx);
     this.touch = new TouchControls(ctx);
@@ -109,7 +113,10 @@ export class Game {
     ctx.fx.clear();
     ctx.player.reset(ctx.world.spawnPoint, ctx.world.spawnYaw);
     ctx.weapons.reset();
+    ctx.zombies.reset();
     ctx.cameraRig.snapTo(ctx.player.position);
+    ctx.stats.kills = 0;
+    ctx.stats.headshots = 0;
     ctx.stats.shots = 0;
     ctx.stats.hits = 0;
     ctx.stats.targetsDropped = 0;
@@ -162,6 +169,7 @@ export class Game {
     ctx.physics.step(dt);
     ctx.world.update(dt);
     ctx.player.postPhysics(dt);
+    ctx.zombies.update(dt);
     ctx.weapons.update(dt);
     ctx.cameraRig.update(
       rawDt,

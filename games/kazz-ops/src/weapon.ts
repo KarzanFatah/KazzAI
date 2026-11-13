@@ -10,7 +10,7 @@ const DRY_FIRE_INTERVAL = 0.35;
 /** An empty mag starts reloading on its own after this long (if there is reserve). */
 const AUTO_RELOAD_DELAY = 0.3;
 /** Seconds (at reloadSpeedMul 1) for the pump that ends a shell-by-shell reload. */
-const PUMP_TIME = 0.35;
+const PUMP_TIME = 0.3;
 /** Fraction of the pump-action's shot interval at which the slide is racked. */
 const PUMP_AT = 0.4;
 const MAG_STAGES = [
@@ -182,6 +182,14 @@ export class WeaponSystem {
     const n = this.shotsSinceRead;
     this.shotsSinceRead = 0;
     return n;
+  }
+
+  /**
+   * Add spare ammo to every weapon: `fraction` of each weapon's reserveMax (pickups, wave bonus).
+   * STUB: to be implemented by the game-mode engineer.
+   */
+  addAmmo(fraction: number): void {
+    void fraction;
   }
 
   /** Refill everything and select slot 1. */
