@@ -5,6 +5,8 @@
   --hud-accent: #39d0c0;
   --hud-warn: #ff8a3d;
   --hud-bg: rgba(14, 19, 27, 0.72);
+  --hud-blood: #ff3b3b;
+  --hud-good: #7ee08a;
   --hud-font: "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
@@ -268,17 +270,20 @@ kbd {
   gap: 3px;
 }
 
-.hud-stamina-label {
+.hud-stamina-label,
+.hud-bar-label {
   font-size: 9px;
   letter-spacing: 0.22em;
   color: var(--hud-dim);
 }
 
-.hud-stamina-label span {
+.hud-stamina-label span,
+.hud-bar-label span {
   color: var(--hud-fg);
 }
 
-.hud-stamina-track {
+.hud-stamina-track,
+.hud-bar-track {
   width: 160px;
   height: 3px;
   overflow: hidden;
@@ -299,6 +304,206 @@ kbd {
 
 .hud-stamina.is-exhausted .hud-stamina-label span {
   color: var(--hud-warn);
+}
+
+/* Health: red bar above the stamina bar; white flash on damage, pulsing when low. */
+.hud-health {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-bottom: -3px;
+}
+
+.hud-health .hud-bar-track {
+  width: 200px;
+  height: 4px;
+}
+
+.hud-health-fill {
+  height: 100%;
+  background: var(--hud-blood);
+  transform-origin: left center;
+  transition: background-color 0.25s;
+}
+
+.hud-health.is-hot .hud-health-fill {
+  background: #fff;
+  transition-duration: 0s;
+}
+
+.hud-health.is-low .hud-bar-label span {
+  color: var(--hud-blood);
+}
+
+.hud-health.is-low .hud-bar-track {
+  animation: hud-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes hud-pulse {
+  50% {
+    opacity: 0.4;
+    box-shadow: 0 0 10px rgba(255, 59, 59, 0.6);
+  }
+}
+
+/* Damage vignette: flash (opacity from JS) + a faint heartbeat pulse at low health. */
+.hud-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(160, 0, 0, 0) 52%,
+    rgba(170, 10, 10, 0.45) 80%,
+    rgba(120, 0, 0, 0.85) 100%
+  );
+  opacity: 0;
+  will-change: opacity;
+}
+
+.hud-vignette--low {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(160, 0, 0, 0) 60%,
+    rgba(150, 0, 0, 0.5) 100%
+  );
+  transition: opacity 0.4s;
+}
+
+.hud--low-health .hud-vignette--low {
+  animation: hud-heartbeat 0.9s ease-in-out infinite;
+}
+
+@keyframes hud-heartbeat {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  15% {
+    opacity: 0.7;
+  }
+  30% {
+    opacity: 0.35;
+  }
+  45% {
+    opacity: 0.6;
+  }
+}
+
+/* Wave status, top centre. */
+.hud-wave {
+  position: absolute;
+  top: calc(var(--safe-t) + 12px);
+  left: 50%;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.26em;
+  color: var(--hud-dim);
+  background: rgba(14, 19, 27, 0.45);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  transition:
+    color 0.3s,
+    border-color 0.3s;
+}
+
+.hud-wave.is-active {
+  color: var(--hud-fg);
+  border-color: var(--hud-blood);
+}
+
+.hud--intro .hud-wave {
+  opacity: 0;
+}
+
+/* Narrow phones: tuck the wave status under the ammo so it never covers the weapon name. */
+@media (max-width: 600px) {
+  .hud-wave {
+    top: calc(var(--safe-t) + 50px);
+    left: auto;
+    right: calc(var(--safe-r) + 12px);
+    padding: 3px 8px;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    transform: none;
+  }
+}
+
+/* Big centre banner (wave start / cleared). */
+.hud-banner {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  text-align: center;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1.15);
+  transition:
+    opacity 0.5s,
+    transform 0.6s;
+}
+
+.hud-banner.is-shown {
+  opacity: 1;
+  transform: translate(-50%, -50%);
+  transition-duration: 0.18s;
+}
+
+.hud-banner-title {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  color: #fff;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.8),
+    0 0 28px rgba(255, 40, 40, 0.55);
+}
+
+.hud-banner-sub {
+  margin-top: 6px;
+  font-size: 12px;
+  letter-spacing: 0.4em;
+  color: var(--hud-blood);
+}
+
+.hud-banner.is-good .hud-banner-title {
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.8),
+    0 0 28px rgba(57, 208, 192, 0.55);
+}
+
+.hud-banner.is-good .hud-banner-sub {
+  color: var(--hud-accent);
+}
+
+/* Pickup pop above the bars. */
+.hud-pickup {
+  min-height: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: #ffd166;
+  opacity: 0;
+  transform: translateY(6px);
+  transition:
+    opacity 0.4s,
+    transform 0.4s;
+}
+
+.hud-pickup.is-health {
+  color: var(--hud-good);
+}
+
+.hud-pickup.is-shown {
+  opacity: 1;
+  transform: none;
+  transition-duration: 0.1s;
+}
+
+.hud--dead .hud-state,
+.hud--dead .hud-pickup {
+  opacity: 0;
 }
 
 .hud-hints {
@@ -390,6 +595,70 @@ kbd {
   background: var(--hud-warn);
 }
 
+/* Headshot: bigger, thicker, red X. */
+.xh-hit.is-head {
+  --gap: 8px;
+}
+
+.xh-hit.is-head .xh-tick {
+  background: var(--hud-blood);
+}
+
+.xh-hit.is-head .xh-t,
+.xh-hit.is-head .xh-b {
+  width: 3px;
+  height: 10px;
+}
+
+.xh-hit.is-head .xh-l,
+.xh-hit.is-head .xh-r {
+  width: 10px;
+  height: 3px;
+}
+
+.xh-hit.is-head .xh-t {
+  transform: translate(-1.5px, calc(-10px - var(--gap)));
+}
+
+.xh-hit.is-head .xh-b {
+  transform: translate(-1.5px, var(--gap));
+}
+
+.xh-hit.is-head .xh-l {
+  transform: translate(calc(-10px - var(--gap)), -1.5px);
+}
+
+.xh-hit.is-head .xh-r {
+  transform: translate(var(--gap), -1.5px);
+}
+
+.xh-kill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  color: #fff;
+  opacity: 0;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7));
+}
+
+.xh-kill svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.xh-kill .hole {
+  fill: rgba(10, 12, 16, 0.9);
+}
+
+.xh-kill.is-head {
+  color: var(--hud-blood);
+}
+
 .xh.is-blocked > .xh-tick,
 .xh.is-blocked > .xh-dot {
   opacity: 0.3;
@@ -400,6 +669,7 @@ kbd {
 }
 
 .hud--intro .xh,
+.hud--dead .xh,
 .ui-hover .xh {
   opacity: 0;
 }
@@ -531,6 +801,172 @@ kbd {
     gap: 7px 12px;
     margin-bottom: 12px;
     padding: 10px 0;
+  }
+}
+
+/* ---------- Game over ---------- */
+
+.gameover {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  padding: calc(var(--safe-t) + 16px) calc(var(--safe-r) + 16px)
+    calc(var(--safe-b) + 16px) calc(var(--safe-l) + 16px);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(40, 6, 8, 0.35),
+    rgba(20, 4, 6, 0.75)
+  );
+  text-transform: uppercase;
+  text-shadow: var(--hud-shadow);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 0.3s,
+    visibility 0s 0.3s;
+}
+
+.gameover.is-shown {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  /* Let the fall animation play first. */
+  transition:
+    opacity 0.6s 0.8s,
+    visibility 0s 0.8s;
+}
+
+.gameover-panel {
+  box-sizing: border-box;
+  width: min(360px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 22px 26px 18px;
+  text-align: center;
+  background: rgba(14, 19, 27, 0.86);
+  border: 1px solid var(--hud-line);
+  border-top: 2px solid var(--hud-blood);
+  border-radius: 4px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+.gameover-kicker {
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--hud-blood);
+}
+
+.gameover-title {
+  margin: 6px 0 2px;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.26em;
+  color: #fff;
+}
+
+.gameover-best-tag {
+  height: 14px;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  color: var(--hud-accent);
+  visibility: hidden;
+}
+
+.gameover-best-tag.is-shown {
+  visibility: visible;
+  animation: intro-pulse 1.2s ease-in-out infinite;
+}
+
+.gameover-stats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 12px 0 18px;
+  padding: 12px 0;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-align: left;
+  border-top: 1px solid var(--hud-line);
+  border-bottom: 1px solid var(--hud-line);
+}
+
+.gameover-stats dt {
+  color: var(--hud-dim);
+}
+
+.gameover-stats dd {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.gameover-btn {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  color: #fff;
+  background: var(--hud-blood);
+  border: 0;
+  border-radius: 3px;
+  box-shadow: 0 6px 18px rgba(255, 59, 59, 0.3);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    transform 0.08s,
+    filter 0.12s;
+}
+
+.gameover-btn:hover {
+  filter: brightness(1.1);
+}
+
+.gameover-btn:active {
+  transform: scale(0.97);
+}
+
+.gameover-btn:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+.gameover-hint {
+  margin-top: 10px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: none;
+  color: var(--hud-dim);
+}
+
+.touch-on .gameover-hint {
+  display: none;
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .gameover-panel {
+    padding: 14px 22px 12px;
+  }
+
+  .gameover-title {
+    font-size: 26px;
+  }
+
+  .gameover-stats {
+    grid-template-columns: 1fr auto 1fr auto;
+    margin: 8px 0 12px;
+    padding: 8px 0;
+  }
+
+  .hud-banner-title {
+    font-size: 30px;
   }
 }
 
@@ -832,6 +1268,13 @@ kbd {
   display: none;
 }
 
+.touch.is-dead .touch-zone,
+.touch.is-dead .stick,
+.touch.is-dead .stick-ghost,
+.touch.is-dead .touch-actions {
+  display: none;
+}
+
 .touch-zone {
   position: absolute;
   top: 32%;
@@ -1025,7 +1468,10 @@ kbd {
 
 @media (prefers-reduced-motion: reduce) {
   .intro-start,
-  .hud-ammo-status.is-warn {
+  .hud-ammo-status.is-warn,
+  .hud-health.is-low .hud-bar-track,
+  .hud--low-health .hud-vignette--low,
+  .gameover-best-tag.is-shown {
     animation: none;
   }
 }

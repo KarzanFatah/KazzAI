@@ -106,7 +106,7 @@ export class Game {
     this.rafId = 0;
   }
 
-  /** F9: put the whole sandbox back to its initial state. */
+  /** F9 / TRY AGAIN: put everything back and start a fresh survival run. */
   reset(): void {
     const { ctx } = this;
     ctx.world.reset();
@@ -122,7 +122,8 @@ export class Game {
     ctx.stats.targetsDropped = 0;
     ctx.stats.barrelsExploded = 0;
     ctx.events.emit("reset", {});
-    ctx.events.emit("toast", { text: "SANDBOX RESET" });
+    ctx.events.emit("toast", { text: "NEW RUN" });
+    ctx.zombies.start();
   }
 
   /**
@@ -201,6 +202,7 @@ export class Game {
     if (!this.gestureSeen) {
       this.gestureSeen = true;
       this.ctx.hud.dismissIntro();
+      this.ctx.zombies.start();
     }
   };
 }

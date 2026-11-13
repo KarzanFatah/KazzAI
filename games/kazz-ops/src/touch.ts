@@ -190,6 +190,7 @@ export class TouchControls {
   private running = false;
   private firing = false;
   private shown = false;
+  private dead = false;
   private readonly forced = forcedTouch();
 
   constructor(private readonly ctx: GameContext) {
@@ -239,6 +240,12 @@ export class TouchControls {
       if (!shown) this.releaseAll();
     }
     if (!shown) return;
+    // Dead: only the utility row stays (RESET restarts; the GAME OVER panel has TRY AGAIN).
+    if (player.dead !== this.dead) {
+      this.dead = player.dead;
+      this.root.classList.toggle("is-dead", this.dead);
+      if (this.dead) this.releaseAll();
+    }
     this.setOn("crouch", player.crouched || player.state === "slide");
     this.setOn("sprint", player.state === "tactical");
     this.setOn("aim", this.aimToggled);

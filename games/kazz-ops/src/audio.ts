@@ -1,5 +1,6 @@
 import type * as THREE from "three";
 import type { GameContext, Surface, WeaponDef, WeaponSound } from "./types";
+import type { ZombieKind } from "./zombies";
 
 type Vec3 = THREE.Vector3Like;
 
@@ -35,6 +36,12 @@ const PUMP_DELAY = 0.4;
 const PUMP_DEDUPE = 0.65;
 /** Shotgun pellets each make a quieter impact. */
 const PELLET_LEVEL = 0.55;
+/** At most this many zombie groans overlap; the rest are skipped. */
+const MAX_GROANS = 3;
+/** Heartbeat below this health; its interval shrinks as health drops. */
+const HEARTBEAT_HEALTH = 30;
+const HEARTBEAT_SLOW = 0.95;
+const HEARTBEAT_FAST = 0.55;
 
 const clamp = (v: number, lo: number, hi: number): number =>
   Math.min(hi, Math.max(lo, v));
@@ -182,6 +189,11 @@ interface ToneLayer extends Envelope {
   freqTo?: number;
   /** Seconds to glide from freq to freqTo (default: the whole layer). */
   glide?: number;
+  /** Optional filter on the oscillator (formants for voices, darkening for drones). */
+  filter?: BiquadFilterType;
+  cutoff?: number;
+  cutoffTo?: number;
+  q?: number;
 }
 
 /** One resonant mode of a struck object, relative to the base pitch, gain and decay. */
@@ -316,9 +328,15 @@ class Voice {
       );
     }
     const env = this.envelope(start, layer);
-    osc.connect(env);
+    let filter: BiquadFilterNode | null = null;
+    if (layer.filter) {
+      filter = this.filterNode(layer.filter, start, layer.dur, layer.cutoff, layer.cutoffTo, layer.q);
+      osc.connect(filter).connect(env);
+    } else {
+      osc.connect(env);
+    }
     osc.start(start);
-    this.finish(osc, start + layer.dur, env, null);
+    this.finish(osc, start + layer.dur, env, filter);
   }
 
   /** Struck resonance: one exponentially decaying partial per mode. */
@@ -349,13 +367,22 @@ class Voice {
   }
 
   private filter(type: BiquadFilterType, start: number, layer: NoiseLayer): BiquadFilterNode {
+    return this.filterNode(type, start, layer.dur, layer.freq, layer.freqTo, layer.q);
+  }
+
+  private filterNode(
+    type: BiquadFilterType,
+    start: number,
+    dur: number,
+    freq = 1000,
+    freqTo?: number,
+    q?: number,
+  ): BiquadFilterNode {
     const filter = this.ac.createBiquadFilter();
     filter.type = type;
-    filter.frequency.setValueAtTime(this.hz(layer.freq ?? 1000), start);
-    if (layer.freqTo) {
-      filter.frequency.exponentialRampToValueAtTime(this.hz(layer.freqTo), start + layer.dur);
-    }
-    if (layer.q !== undefined) filter.Q.value = layer.q;
+    filter.frequency.setValueAtTime(this.hz(freq), start);
+    if (freqTo) filter.frequency.exponentialRampToValueAtTime(this.hz(freqTo), start + dur);
+    if (q !== undefined) filter.Q.value = q;
     return filter;
   }
 
@@ -666,6 +693,17 @@ const IMPACTS: Record<Surface, ImpactRecipe> = {
       v.noise(n.crackle, { dur: 0.08, gain: 0.25, filter: "bandpass", freq: 2500, q: 0.8 }); // sand
     },
   },
+  flesh: {
+    gain: 0.5,
+    range: 35,
+    send: 0.1,
+    pitchVar: 0.12,
+    play(v, n) {
+      v.tone({ dur: 0.1, gain: 0.5, freq: 140, freqTo: 65 }); // wet thud
+      v.noise(n.pink, { dur: 0.09, gain: 1.4, filter: "lowpass", freq: 700, freqTo: 300 });
+      v.noise(n.white, { dur: 0.05, gain: 1.2, filter: "bandpass", freq: 420, q: 2.5 }); // squelch
+    },
+  },
   ground: {
     gain: 0.55,
     range: 35,
@@ -695,7 +733,52 @@ const THUDS: Record<Surface, Thud> = {
   plastic: { freq: 210, band: 600, q: 2.5 },
   rubber: { freq: 85, band: 300, q: 1 },
   fabric: { freq: 100, band: 400, q: 0.8 },
+  flesh: { freq: 80, band: 320, q: 0.8 },
   ground: { freq: 90, band: 350, q: 0.8 },
+};
+
+/** Zombie voice per kind: duration, saw pitch glide, formant bands, breath/rasp colour. */
+interface GroanRecipe {
+  gain: number;
+  range: number;
+  dur: [number, number];
+  pitch: [number, number];
+  formants: readonly [number, number];
+  q: number;
+  breath: { buffer: keyof NoiseBank; band: number; bandTo: number; q: number; gain: number };
+}
+
+const GROANS: Record<ZombieKind, GroanRecipe> = {
+  // Long hollow "ooh" moan, drooping in pitch.
+  walker: {
+    gain: 0.4,
+    range: 32,
+    dur: [1.1, 1.8],
+    pitch: [105, 72],
+    formants: [460, 820],
+    q: 5,
+    breath: { buffer: "pink", band: 520, bandTo: 340, q: 3, gain: 0.9 },
+  },
+  // Short raspy shriek that rises then cracks.
+  runner: {
+    gain: 0.36,
+    range: 38,
+    dur: [0.45, 0.7],
+    pitch: [240, 330],
+    formants: [1250, 2300],
+    q: 4,
+    breath: { buffer: "white", band: 2400, bandTo: 1500, q: 1.6, gain: 1.6 },
+  },
+  // Deep chesty growl.
+  brute: {
+    gain: 0.55,
+    range: 42,
+    dur: [1.2, 1.7],
+    pitch: [58, 44],
+    formants: [300, 620],
+    q: 3,
+    breath: { buffer: "brown", band: 380, bandTo: 220, q: 1.2, gain: 1.4 },
+  },
 };
 
 /** Handling sounds are pitched per weapon (small pistol parts click higher). */
@@ -706,6 +789,7 @@ const HANDLING_PITCH: Record<WeaponDef["id"], number> = {
 };
 
 export type BlipKind = "camera" | "toast" | "reset";
+export type PickupKind = "ammo" | "health";
 
 /** Every game sound, synthesized from layered noise and oscillators. */
 export class Sfx {
@@ -714,6 +798,12 @@ export class Sfx {
   private readonly impactGate = new Throttle(0.06, 5);
   private readonly collisionGate = new Throttle(0.08, 4);
   private readonly uiGate = new Throttle(0.12, 1);
+  private readonly fleshGate = new Throttle(0.05, 3);
+  private readonly deathGate = new Throttle(0.08, 3);
+  private readonly swipeGate = new Throttle(0.1, 2);
+  private readonly hurtGate = new Throttle(0.15, 1);
+  /** End times of the groans currently playing (MAX_GROANS slots). */
+  private readonly groanEnds = new Float64Array(MAX_GROANS);
 
   constructor(private readonly engine: SoundEngine) {}
 
@@ -1015,6 +1105,192 @@ export class Sfx {
     }
   }
 
+  /** Formant-filtered saw + breath noise; kind sets the character. Max MAX_GROANS at once. */
+  groan(kind: ZombieKind, pos: Vec3): void {
+    const now = this.engine.now;
+    let slot = -1;
+    for (let i = 0; i < MAX_GROANS; i++) if (this.groanEnds[i] <= now) slot = i;
+    if (slot < 0) return;
+    const r = GROANS[kind];
+    const v = this.engine.voice(pos, {
+      gain: r.gain,
+      range: r.range,
+      send: 0.35,
+      priority: 0,
+      pitchVar: 0.12,
+    });
+    if (!v) return;
+    const dur = rand(r.dur[0], r.dur[1]);
+    const attack = dur * 0.25;
+    const hold = dur * 0.3;
+    const [f1, f2] = r.formants;
+    const voice = { type: "sawtooth" as const, dur, attack, hold, freq: r.pitch[0], freqTo: r.pitch[1] };
+    v.tone({ ...voice, gain: 0.5, filter: "bandpass", cutoff: f1, cutoffTo: f1 * 0.85, q: r.q });
+    v.tone({ ...voice, gain: 0.3, filter: "bandpass", cutoff: f2, cutoffTo: f2 * 0.9, q: r.q });
+    v.tone({ ...voice, gain: 0.2, freq: r.pitch[0] * 1.012, filter: "lowpass", cutoff: 360 }); // chest
+    const b = r.breath;
+    v.noise(this.engine.noise[b.buffer], {
+      dur,
+      gain: b.gain,
+      attack,
+      hold,
+      filter: "bandpass",
+      freq: b.band,
+      freqTo: b.bandTo,
+      q: b.q,
+    });
+    this.groanEnds[slot] = v.endTime;
+  }
+
+  /** Bullet into a zombie: wet slap; a headshot adds a bony crack. */
+  zombieHit(pos: Vec3, headshot: boolean): void {
+    if (!this.fleshGate.allow(this.engine.now)) return;
+    const v = this.engine.voice(pos, { gain: 0.42, range: 35, send: 0.1, pitchVar: 0.12 });
+    if (!v) return;
+    const { white, pink } = this.engine.noise;
+    v.noise(white, { dur: 0.035, gain: 1.6, filter: "bandpass", freq: 950, q: 1.2 }); // slap
+    v.noise(pink, { at: 0.008, dur: 0.12, gain: 1, filter: "lowpass", freq: 520, freqTo: 220 });
+    v.tone({ dur: 0.08, gain: 0.35, freq: 170, freqTo: 80 });
+    if (headshot) {
+      v.noise(white, { dur: 0.02, gain: 1.4, filter: "highpass", freq: 2600 }); // crack
+      v.tone({ dur: 0.04, gain: 0.12, type: "triangle", freq: 1900, freqTo: 1300 });
+    }
+  }
+
+  /** Body collapsing onto the ground (brutes land heavier). */
+  zombieKilled(pos: Vec3, kind: ZombieKind): void {
+    if (!this.deathGate.allow(this.engine.now)) return;
+    const heavy = kind === "brute";
+    const v = this.engine.voice(pos, {
+      gain: heavy ? 0.7 : 0.5,
+      range: 40,
+      send: 0.2,
+      pitch: heavy ? 0.75 : 1,
+      pitchVar: 0.1,
+      delay: 0.22,
+    });
+    if (!v) return;
+    const { pink, brown, crackle } = this.engine.noise;
+    v.tone({ dur: 0.22, gain: 0.55, freq: 85, freqTo: 42 }); // thud
+    v.noise(brown, { dur: 0.3, gain: 1.6, filter: "lowpass", freq: 320, freqTo: 140 });
+    v.noise(pink, { dur: 0.14, gain: 0.7, filter: "bandpass", freq: 650, q: 0.9 }); // cloth
+    v.noise(crackle, { at: 0.03, dur: 0.18, gain: 0.25, filter: "highpass", freq: 2200 }); // grit
+    v.tone({ at: 0.16, dur: 0.12, gain: 0.25, freq: 70, freqTo: 45 }); // second bounce
+  }
+
+  /** Claw swipe whoosh. */
+  zombieAttack(pos: Vec3): void {
+    if (!this.swipeGate.allow(this.engine.now)) return;
+    const v = this.engine.voice(pos, { gain: 0.4, range: 25, send: 0.1, pitchVar: 0.12 });
+    if (!v) return;
+    const { pink, white } = this.engine.noise;
+    v.noise(pink, {
+      dur: 0.22,
+      gain: 1.2,
+      attack: 0.09,
+      filter: "bandpass",
+      freq: 600,
+      freqTo: 2100,
+      q: 1.3,
+    });
+    v.noise(white, { at: 0.08, dur: 0.1, gain: 0.5, filter: "highpass", freq: 3000 });
+  }
+
+  /** The player gets hit: dull body blow + a short grunt. */
+  playerHurt(amount: number): void {
+    if (!this.hurtGate.allow(this.engine.now)) return;
+    const level = clamp(0.5 + amount / 40, 0.5, 1.1);
+    const v = this.engine.voice(null, { gain: 0.55 * level, priority: 2, pitchVar: 0.08 });
+    if (!v) return;
+    const { pink } = this.engine.noise;
+    v.tone({ dur: 0.16, gain: 0.7, freq: 115, freqTo: 52 }); // blow
+    v.noise(pink, { dur: 0.12, gain: 1.2, filter: "lowpass", freq: 650, freqTo: 250 });
+    const grunt = { at: 0.03, dur: 0.2, attack: 0.02, type: "sawtooth" as const, freq: 150, freqTo: 112 };
+    v.tone({ ...grunt, gain: 0.35, filter: "bandpass", cutoff: 640, q: 6 });
+    v.tone({ ...grunt, gain: 0.18, filter: "bandpass", cutoff: 1150, q: 6 });
+    v.noise(pink, { at: 0.03, dur: 0.18, gain: 0.5, filter: "bandpass", freq: 900, q: 3 });
+  }
+
+  /** Lub-dub at low health. */
+  heartbeat(level: number): void {
+    const v = this.engine.voice(null, {
+      gain: 0.35 + 0.35 * level,
+      priority: 2,
+      pitchVar: 0,
+      gainVar: 0,
+    });
+    if (!v) return;
+    v.tone({ dur: 0.14, gain: 0.9, freq: 62, freqTo: 44, filter: "lowpass", cutoff: 180 });
+    v.tone({ at: 0.17, dur: 0.12, gain: 0.65, freq: 56, freqTo: 40, filter: "lowpass", cutoff: 160 });
+  }
+
+  /** Low drone falling away. */
+  playerDied(): void {
+    const v = this.engine.voice(null, { gain: 0.6, priority: 3, pitchVar: 0, send: 0.6 });
+    if (!v) return;
+    const { brown } = this.engine.noise;
+    v.tone({
+      dur: 2.6,
+      gain: 0.45,
+      attack: 0.05,
+      hold: 0.3,
+      type: "sawtooth",
+      freq: 110,
+      freqTo: 34,
+      filter: "lowpass",
+      cutoff: 700,
+      cutoffTo: 160,
+    });
+    v.tone({ dur: 2.8, gain: 0.6, attack: 0.05, hold: 0.4, freq: 73, freqTo: 28 });
+    v.noise(brown, { dur: 3, gain: 1.2, attack: 0.6, hold: 0.8, filter: "lowpass", freq: 260 });
+  }
+
+  /** Ominous low horn swelling in: detuned saws a fifth apart under an opening filter. */
+  waveStart(): void {
+    const v = this.engine.voice(null, { gain: 0.5, priority: 3, pitchVar: 0, send: 0.7 });
+    if (!v) return;
+    const { pink } = this.engine.noise;
+    const horn = {
+      dur: 2.9,
+      attack: 0.9,
+      hold: 0.8,
+      type: "sawtooth" as const,
+      filter: "lowpass" as const,
+      cutoff: 240,
+      cutoffTo: 900,
+      q: 2,
+    };
+    v.tone({ ...horn, gain: 0.4, freq: 55, freqTo: 52 });
+    v.tone({ ...horn, gain: 0.3, freq: 55.6, freqTo: 52.4 });
+    v.tone({ ...horn, gain: 0.25, freq: 82.4, freqTo: 78 });
+    v.tone({ dur: 3, gain: 0.5, attack: 1, hold: 0.8, freq: 41, freqTo: 38 }); // sub
+    v.noise(pink, { dur: 2.8, gain: 0.5, attack: 1.2, filter: "lowpass", freq: 220 });
+  }
+
+  /** Relief chime: a rising major arpeggio. */
+  waveCleared(): void {
+    const v = this.engine.voice(null, { gain: 0.32, priority: 2, pitchVar: 0, send: 0.5 });
+    if (!v) return;
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    for (let i = 0; i < notes.length; i++) {
+      v.ring(notes[i], BELL_MODES, 0.22, 0.9 + i * 0.25, i * 0.11);
+    }
+  }
+
+  /** Bright two-step blip (health a little lower). */
+  pickup(kind: PickupKind): void {
+    const v = this.engine.voice(null, {
+      gain: 0.26,
+      priority: 2,
+      pitch: kind === "health" ? 0.8 : 1,
+      pitchVar: 0,
+      gainVar: 0,
+    });
+    if (!v) return;
+    v.tone({ dur: 0.08, gain: 0.5, type: "triangle", freq: 880, freqTo: 1320, glide: 0.05 });
+    v.tone({ at: 0.065, dur: 0.14, gain: 0.45, type: "triangle", freq: 1760 });
+  }
+
   /** Soft "thup": filtered gas puff, low thump, bolt clack. Built to stay clean in rapid fire. */
   private suppressedShot(pos: Vec3): void {
     const v = this.engine.voice(pos, {
@@ -1179,6 +1455,7 @@ export class AudioSystem {
   private engine: SoundEngine | null = null;
   private sfx: Sfx | null = null;
   private unavailable = false;
+  private heartTimer = 0;
   private readonly unsubscribe: (() => void)[];
 
   constructor(private readonly ctx: GameContext) {
@@ -1203,6 +1480,15 @@ export class AudioSystem {
       events.on("cameraMode", () => this.live()?.blip("camera")),
       events.on("toast", () => this.live()?.blip("toast")),
       events.on("reset", () => this.live()?.blip("reset")),
+      events.on("zombieGroan", (e) => this.live()?.groan(e.kind, e.position)),
+      events.on("zombieHit", (e) => this.live()?.zombieHit(e.position, e.headshot)),
+      events.on("zombieKilled", (e) => this.live()?.zombieKilled(e.position, e.kind)),
+      events.on("zombieAttack", (e) => this.live()?.zombieAttack(e.position)),
+      events.on("playerHurt", (e) => this.live()?.playerHurt(e.amount)),
+      events.on("playerDied", () => this.live()?.playerDied()),
+      events.on("waveStart", () => this.live()?.waveStart()),
+      events.on("waveCleared", () => this.live()?.waveCleared()),
+      events.on("pickup", (e) => this.live()?.pickup(e.kind)),
     ];
   }
 
@@ -1215,11 +1501,13 @@ export class AudioSystem {
     }
   }
 
-  /** Per-frame: master volume from tuning, listener at the player. */
+  /** Per-frame: master volume from tuning, listener at the player, low-health heartbeat. */
   update(dt: number): void {
     if (!this.engine) return;
+    const { player } = this.ctx;
     this.engine.setVolume(this.ctx.tuning.masterVolume);
-    this.engine.setListener(this.ctx.player.position, this.ctx.cameraRig.camera);
+    this.engine.setListener(player.position, this.ctx.cameraRig.camera);
+    this.updateHeartbeat(dt, player.health, player.dead);
   }
 
   dispose(): void {
@@ -1229,6 +1517,18 @@ export class AudioSystem {
     this.context = null;
     this.engine = null;
     this.sfx = null;
+  }
+
+  private updateHeartbeat(dt: number, health: number, dead: boolean): void {
+    if (dead || health >= HEARTBEAT_HEALTH) {
+      this.heartTimer = 0;
+      return;
+    }
+    this.heartTimer -= dt;
+    if (this.heartTimer > 0) return;
+    const level = 1 - health / HEARTBEAT_HEALTH;
+    this.heartTimer = HEARTBEAT_SLOW + (HEARTBEAT_FAST - HEARTBEAT_SLOW) * level;
+    this.live()?.heartbeat(level);
   }
 
   /** Recipes, or null before unlock and while suspended (so sounds don't pile up). */

@@ -256,6 +256,7 @@ const DECAL_CONCRETE = 2;
 const DECAL_SCORCH = 3;
 const DECAL_SMUDGE = 4;
 const DECAL_PLASTIC = 5;
+const DECAL_BLOOD = 6;
 const DECAL_COLS = 4;
 const DECAL_ROWS = 2;
 
@@ -354,6 +355,23 @@ const DECAL_PAINTERS: Painter[] = [
       [0, "rgba(0,0,0,1)"],
       [0.75, "rgba(22,12,8,1)"],
       [1, "rgba(22,12,8,0)"],
+    ]);
+  },
+  // Blood: irregular dark pool with satellite drops (tinted per splat).
+  (g, rng) => {
+    g.fillStyle = "rgba(255,255,255,0.9)";
+    jaggedPath(g, rng, 30, 0.45, 18);
+    g.fill();
+    for (let i = 0; i < 14; i++) {
+      const a = rng() * TAU;
+      const d = 26 + rng() * 30;
+      g.beginPath();
+      g.arc(Math.cos(a) * d, Math.sin(a) * d, 1.5 + rng() * 4.5, 0, TAU);
+      g.fill();
+    }
+    radial(g, 0, 0, 26, [
+      [0, "rgba(120,120,120,0.55)"],
+      [1, "rgba(120,120,120,0)"],
     ]);
   },
 ];
@@ -1517,6 +1535,19 @@ const SMOKE_COLUMN: SpritePreset = {
   tile: SPRITE_PUFF,
   spin: 0.5,
 };
+const BLOOD_MIST: SpritePreset = {
+  life: [0.25, 0.45],
+  size0: 0.12,
+  size1: 0.42,
+  drag: 6,
+  lift: -0.6,
+  color0: new THREE.Color(0x5a0b08),
+  color1: new THREE.Color(0x3a0705),
+  alpha: 0.6,
+  fadeIn: 0.05,
+  tile: SPRITE_PUFF,
+  spin: 1.5,
+};
 const BLAST_DUST: SpritePreset = {
   life: [0.7, 1.2],
   size0: 0.6,
@@ -1539,6 +1570,7 @@ const DUST_COLOR: Record<Surface, THREE.Color> = {
   plastic: new THREE.Color(0xe0874a),
   rubber: new THREE.Color(0x3c3c3c),
   fabric: new THREE.Color(0xb9a37a),
+  flesh: new THREE.Color(0x4a0806),
   ground: new THREE.Color(0x6a7590),
 };
 
@@ -1557,6 +1589,9 @@ const CONCRETE_CHIPS = [0xbab7af, 0x9c9991, 0xd2cfc8].map(
 const PLASTIC_CHIPS = [0xe2681f, 0xf08a3a].map((c) => new THREE.Color(c));
 const GROUND_CHIPS = [0x2e3747, 0x3a4456].map((c) => new THREE.Color(c));
 const BLAST_DEBRIS = [0x2a2624, 0x3b3330, 0x6b1f1a, 0x1a1817, 0x8a2a1e].map(
+  (c) => new THREE.Color(c),
+);
+const BLOOD_DROPS = [0x4a0705, 0x5e0c08, 0x370504].map(
   (c) => new THREE.Color(c),
 );
 const BRASS_TINTS = [1, 0.92, 1.06].map((k) => new THREE.Color(k, k, k));
@@ -1584,6 +1619,12 @@ const DECAL_STYLE: Record<Surface, DecalStyle | null> = {
     color: new THREE.Color(0x9a8a70),
     offset: 0.006,
   },
+  flesh: {
+    tile: DECAL_BLOOD,
+    size: 0.9,
+    color: new THREE.Color(0x3c0604),
+    offset: 0.003,
+  },
   ground: {
     tile: DECAL_SMUDGE,
     size: 0.18,
@@ -1592,9 +1633,10 @@ const DECAL_STYLE: Record<Surface, DecalStyle | null> = {
   },
 };
 
-// Scorch marks come first so bullet holes are drawn on top of them.
+// Scorch marks first, then blood pools, so bullet holes are drawn on top of both.
 const RING_SCORCH = 0;
-const RING_HOLES = 1;
+const RING_BLOOD = 1;
+const RING_HOLES = 2;
 
 type CasingKind = "rifle" | "pistol" | "shell";
 
@@ -1705,7 +1747,7 @@ export class Effects {
         castShadow: false,
       },
     );
-    this.decals = new DecalPool(this.decalAtlas, [10, 140]);
+    this.decals = new DecalPool(this.decalAtlas, [10, 48, 140]);
 
     this.root.add(
       this.decals.mesh,
@@ -1784,6 +1826,10 @@ export class Effects {
       case "fabric":
         this.dust(point, normal, 4, DUST_COLOR.fabric);
         break;
+      case "flesh":
+        // Moving bodies: no hole decal, blood() drops occasional pools on the floor instead.
+        this.blood(point, dir, 1);
+        return;
       case "ground":
         this.dust(point, normal, 3, DUST_COLOR.ground);
         this.chipBurst(point, reflect, 2, GROUND_CHIPS, 0.02, 0.035);
@@ -1842,6 +1888,57 @@ export class Effects {
         rand(1.9, 2.5),
         0.35,
         rand(10, 24),
+      );
+    }
+  }
+
+  /**
+   * Blood burst at a wound: dark mist plus droplets thrown along `dir` that fall and settle.
+   * amount ~1 for a bullet hit, 2-4 for kills/blasts; bigger bursts leave a floor pool.
+   */
+  blood(pos: THREE.Vector3, dir: THREE.Vector3, amount: number): void {
+    const mist = Math.max(1, Math.round(amount * 2));
+    for (let i = 0; i < mist; i++) {
+      jitterDir(tmpVel, dir, 0.9).multiplyScalar(rand(0.5, 1.6));
+      this.smokeSim.spawn(
+        BLOOD_MIST,
+        pos,
+        tmpVel,
+        0.8 + amount * 0.15,
+        i * 0.015,
+      );
+    }
+    const drops = Math.round(amount * 4);
+    for (let i = 0; i < drops; i++) {
+      jitterDir(tmpVel, dir, 0.75).multiplyScalar(rand(1.5, 4));
+      tmpVel.y += rand(0.3, 1.8);
+      const size = rand(0.018, 0.034);
+      this.chips.spawn(
+        pos,
+        tmpVel,
+        size,
+        size * 0.6,
+        size,
+        pick(BLOOD_DROPS),
+        rand(0.7, 1.2),
+        0.05,
+        rand(2, 6),
+      );
+    }
+    if (Math.random() < 0.12 + amount * 0.18) {
+      const style = DECAL_STYLE.flesh;
+      if (!style) return;
+      const reach = rand(0.2, 0.7);
+      tmpA.set(pos.x + dir.x * reach, 0, pos.z + dir.z * reach);
+      this.decals.add(
+        RING_BLOOD,
+        tmpA,
+        UP,
+        style.size * rand(0.45, 0.8) * Math.min(1.6, 0.6 + amount * 0.3),
+        style.tile,
+        tmpColor.copy(style.color).multiplyScalar(rand(0.8, 1.2)),
+        style.offset,
+        null,
       );
     }
   }

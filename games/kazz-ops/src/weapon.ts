@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { WEAPONS, weaponBySlot } from "./weapons-data";
 import type { GameContext, HitInfo, WeaponDef, WeaponSound } from "./types";
+import type { ZombieHit } from "./zombies";
 
 /** Seconds a trigger press stays buffered while the weapon is not ready yet. */
 const FIRE_BUFFER = 0.12;
@@ -8,9 +9,11 @@ const FIRE_BUFFER = 0.12;
 const SWITCH_TIME = 0.25;
 const DRY_FIRE_INTERVAL = 0.35;
 /** An empty mag starts reloading on its own after this long (if there is reserve). */
-const AUTO_RELOAD_DELAY = 0.3;
+const AUTO_RELOAD_DELAY = 0.1;
 /** Seconds (at reloadSpeedMul 1) for the pump that ends a shell-by-shell reload. */
-const PUMP_TIME = 0.3;
+const PUMP_TIME = 0.22;
+/** A reload press during the weapon raise is kept until the weapon is up. */
+const RELOAD_BUFFER = SWITCH_TIME + 0.05;
 /** Fraction of the pump-action's shot interval at which the slide is racked. */
 const PUMP_AT = 0.4;
 const MAG_STAGES = [
@@ -64,6 +67,13 @@ const basisV = new THREE.Vector3();
 const ejectPos = new THREE.Vector3();
 const ejectVel = new THREE.Vector3();
 const kickDir = new THREE.Vector3();
+const zombieHit: ZombieHit = {
+  index: -1,
+  distance: 0,
+  point: new THREE.Vector3(),
+  normal: new THREE.Vector3(),
+  headshot: false,
+};
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 const WORLD_X = new THREE.Vector3(1, 0, 0);
 
@@ -121,6 +131,7 @@ export class WeaponSystem {
   /** True while rounds keep coming back to back (the cooldown remainder is valid credit). */
   private firingStreak = false;
   private fireBuffer = 0;
+  private reloadBuffer = 0;
   private switchTimer = 0;
   private dryFireTimer = 0;
   private emptyTimer = 0;
@@ -144,7 +155,13 @@ export class WeaponSystem {
     prop: null,
   };
 
-  constructor(private readonly ctx: GameContext) {}
+  constructor(private readonly ctx: GameContext) {
+    // Surviving a wave restocks every weapon.
+    ctx.events.on("waveCleared", () => {
+      this.refillReserves();
+      this.syncPublic();
+    });
+  }
 
   /** True during the raise delay after a weapon switch. */
   get switching(): boolean {
@@ -152,15 +169,24 @@ export class WeaponSystem {
   }
 
   update(dt: number): void {
-    const { input, tuning } = this.ctx;
+    const { input, tuning, player } = this.ctx;
     if (tuning.infiniteAmmo >= 0.5) this.refillReserves();
+    if (player.dead) {
+      if (this.reloading) this.endReload();
+      this.syncPublic();
+      return;
+    }
 
     if (input.weaponSlotPressed !== null)
       this.switchTo(input.weaponSlotPressed);
     else if (input.weaponCycle !== 0) this.cycle(Math.sign(input.weaponCycle));
 
     this.tickTimers(dt);
-    if (input.reloadPressed) this.startReload();
+    if (input.reloadPressed) this.reloadBuffer = RELOAD_BUFFER;
+    if (this.reloadBuffer > 0 && this.switchTimer <= 0) {
+      this.reloadBuffer = 0;
+      this.startReload();
+    }
     if (this.reloading) this.updateReload(dt);
     this.updateFiring();
     this.updateAutoReload(dt);
@@ -184,12 +210,16 @@ export class WeaponSystem {
     return n;
   }
 
-  /**
-   * Add spare ammo to every weapon: `fraction` of each weapon's reserveMax (pickups, wave bonus).
-   * STUB: to be implemented by the game-mode engineer.
-   */
+  /** Add spare ammo to every weapon: `fraction` of each weapon's reserveMax (pickups, wave bonus). */
   addAmmo(fraction: number): void {
-    void fraction;
+    WEAPONS.forEach((w, i) => {
+      const s = this.ammoStates[i];
+      s.reserve = Math.min(
+        w.reserveMax,
+        s.reserve + Math.round(fraction * w.reserveMax),
+      );
+    });
+    this.syncPublic();
   }
 
   /** Refill everything and select slot 1. */
@@ -203,6 +233,7 @@ export class WeaponSystem {
     this.reloadProgress = 0;
     this.pumping = false;
     this.switchTimer = 0;
+    this.reloadBuffer = 0;
     this.dryFireTimer = 0;
     this.bloom = 0;
     this.tracerCount = 0;
@@ -244,6 +275,7 @@ export class WeaponSystem {
     const { player } = this.ctx;
     const w = this.current;
     this.switchTimer = Math.max(0, this.switchTimer - dt);
+    this.reloadBuffer -= dt;
     this.dryFireTimer -= dt;
     this.fireBuffer -= dt;
     this.cooldown -= dt;
@@ -399,11 +431,14 @@ export class WeaponSystem {
     rayOrigin.copy(muzzle).addScaledVector(aimDir, -this.rayBackset);
   }
 
-  /** Hitscan one pellet. Returns the distance travelled from rayOrigin. */
+  /** Hitscan one pellet (zombies and props; the nearer wins). Returns the distance travelled. */
   private firePellet(w: WeaponDef, dir: THREE.Vector3): number {
-    const { physics, world, fx, events, stats, tuning } = this.ctx;
+    const { physics, world, fx, events, stats, tuning, zombies } = this.ctx;
     rayEnd.copy(rayOrigin).addScaledVector(dir, w.range);
     const ray = physics.raycast(rayOrigin, rayEnd);
+    const reach = ray ? ray.distance : w.range;
+    const z = zombies.raycast(rayOrigin, dir, reach, zombieHit);
+    if (z && z.distance <= reach) return this.hitZombie(w, dir, z);
     if (!ray) return w.range;
 
     const prop = world.propFromBody(ray.body);
@@ -428,6 +463,22 @@ export class WeaponSystem {
     }
     events.emit("impact", { hit, dir, weapon: w });
     return ray.distance;
+  }
+
+  private hitZombie(w: WeaponDef, dir: THREE.Vector3, z: ZombieHit): number {
+    const { zombies, fx, events, stats, tuning } = this.ctx;
+    zombies.damage(z.index, w.damage * tuning.damageMul, dir, z.point, z.headshot);
+    const hit = this.hit;
+    hit.point.copy(z.point);
+    hit.normal.copy(z.normal);
+    hit.distance = z.distance;
+    hit.surface = "flesh";
+    hit.body = null;
+    hit.prop = null;
+    fx.impact(hit, dir);
+    events.emit("impact", { hit, dir, weapon: w });
+    stats.hits++;
+    return z.distance;
   }
 
   private ejectCasing(w: WeaponDef): void {

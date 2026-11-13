@@ -12,7 +12,7 @@ const KEY_HINTS: readonly (readonly [string, string])[] = [
   ["LMB", "fire"],
   ["R", "reload"],
   ["1-3", "weapons"],
-  ["F9", "reset"],
+  ["F9", "restart"],
   ["TAB", "camera"],
   ["F1", "tune"],
 ];
@@ -24,7 +24,7 @@ const INTRO_DESKTOP: readonly (readonly [string[], string])[] = [
   [["C", "CTRL"], "Slide while running · crouch"],
   [["RMB", "LMB"], "Aim · fire"],
   [["R", "1-3", "WHEEL"], "Reload · switch weapon"],
-  [["TAB", "F9", "F1"], "Camera · reset · tune"],
+  [["TAB", "F9", "F1"], "Camera · restart · tune"],
 ];
 
 const INTRO_TOUCH: readonly (readonly [string[], string])[] = [
@@ -33,7 +33,7 @@ const INTRO_TOUCH: readonly (readonly [string[], string])[] = [
   [["SPRINT", "VAULT"], "Tactical sprint · vault low cover"],
   [["CROUCH"], "Slide while running · crouch"],
   [["AIM", "SWAP"], "Steady aim toggle · next weapon"],
-  [["CAM", "RESET", "⚙"], "Camera · reset · tune"],
+  [["CAM", "RESET", "⚙"], "Camera · restart · tune"],
 ];
 
 const TOAST_HOLD = 1.6;
@@ -44,6 +44,34 @@ const GAP_MIN = 3;
 const GAP_MAX = 90;
 const GAP_SMOOTHING = 22;
 const DEG2RAD = Math.PI / 180;
+
+const LOW_HEALTH = 30;
+const HEALTH_FLASH_TIME = 0.18;
+const VIGNETTE_DECAY = 1.6;
+const BANNER_HOLD = 2.4;
+const PICKUP_HOLD = 1.1;
+const KILL_DECAY = 2.2;
+const BEST_WAVE_KEY = "kazz-ops.bestWave";
+
+/** Small original skull glyph for the kill tick. */
+const SKULL_SVG =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.6C4.6 1.6 2.3 3.9 2.3 7c0 1.9.9 3.2 2.2 3.9v2.6h7V10.9c1.3-.7 2.2-2 2.2-3.9 0-3.1-2.3-5.4-5.7-5.4Z"/><path class="hole" d="M4.4 7.3a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Zm4 0a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0ZM7.2 10.6 8 9.2l.8 1.4Z"/><path class="hole" d="M6.4 12.1h.7v1.4h-.7Zm2.5 0h.7v1.4h-.7Z"/></svg>';
+
+function readBestWave(): number {
+  try {
+    return Number(window.localStorage.getItem(BEST_WAVE_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeBestWave(wave: number): void {
+  try {
+    window.localStorage.setItem(BEST_WAVE_KEY, String(wave));
+  } catch {
+    // Storage blocked (private mode): the best wave just isn't remembered.
+  }
+}
 
 /** Movement tag per state (index into MOVE_TAG_TEXT); crouching uses the last entry. */
 const MOVE_TAG_INDEX: Partial<Record<MoveState, number>> = {
@@ -119,6 +147,10 @@ class Crosshair {
   private shownGap = NaN;
   private hitLevel = 0;
   private shownHit = -1;
+  private hitClass = "";
+  private readonly kill: HTMLDivElement;
+  private killLevel = 0;
+  private shownKill = -1;
 
   constructor(parent: HTMLElement) {
     this.root = el("div", "xh", parent);
@@ -128,6 +160,8 @@ class Crosshair {
     this.hit = el("div", "xh-hit", this.root);
     for (const side of ["t", "b", "l", "r"])
       el("div", `xh-tick xh-${side}`, this.hit);
+    this.kill = el("div", "xh-kill", this.root);
+    this.kill.innerHTML = SKULL_SVG;
   }
 
   moveTo(x: number, y: number): void {
@@ -149,12 +183,24 @@ class Crosshair {
     this.root.style.setProperty("--gap", `${g}px`);
   }
 
-  flash(strength: number, strong: boolean): void {
+  /** Hit marker; `tone` = "is-strong" (target) or "is-head" (headshot) recolours it. */
+  flash(strength: number, tone = ""): void {
     this.hitLevel = Math.max(this.hitLevel, strength);
-    if (strong) this.hit.classList.add("is-strong");
+    if (!tone || tone === this.hitClass) return;
+    if (this.hitClass) this.hit.classList.remove(this.hitClass);
+    this.hitClass = tone;
+    this.hit.classList.add(tone);
+  }
+
+  /** Skull tick next to the crosshair (red for a headshot kill). */
+  flashKill(headshot: boolean): void {
+    this.killLevel = 1;
+    this.shownKill = -1;
+    this.kill.classList.toggle("is-head", headshot);
   }
 
   update(dt: number): void {
+    this.updateKill(dt);
     if (this.hitLevel <= 0 && this.shownHit === 0) return;
     this.hitLevel = Math.max(0, this.hitLevel - HIT_DECAY * dt);
     const level = Math.round(this.hitLevel * 50) / 50;
@@ -163,7 +209,74 @@ class Crosshair {
     const scale = 0.85 + level * 0.45;
     this.hit.style.opacity = String(Math.min(1, level * 1.4));
     this.hit.style.transform = `rotate(45deg) scale(${scale})`;
-    if (level === 0) this.hit.classList.remove("is-strong");
+    if (level === 0 && this.hitClass) {
+      this.hit.classList.remove(this.hitClass);
+      this.hitClass = "";
+    }
+  }
+
+  private updateKill(dt: number): void {
+    if (this.killLevel <= 0 && this.shownKill === 0) return;
+    this.killLevel = Math.max(0, this.killLevel - KILL_DECAY * dt);
+    const level = Math.round(this.killLevel * 40) / 40;
+    if (level === this.shownKill) return;
+    this.shownKill = level;
+    // Pops in big, settles, then fades and drifts up.
+    const pop = 1 + Math.max(0, level - 0.8) * 2.5;
+    this.kill.style.opacity = String(Math.min(1, level * 2.5));
+    this.kill.style.transform = `translate(14px, ${-22 - (1 - level) * 10}px) scale(${pop})`;
+  }
+}
+
+/** YOU DIED panel with the run summary and a TRY AGAIN button. */
+class GameOver {
+  readonly root: HTMLDivElement;
+  private readonly wave: TextField;
+  private readonly kills: TextField;
+  private readonly headshots: TextField;
+  private readonly best: TextField;
+  private readonly bestTag: HTMLDivElement;
+
+  constructor(parent: HTMLElement, onRetry: () => void) {
+    this.root = el("div", "gameover", parent);
+    const panel = el("div", "gameover-panel", this.root);
+    el("div", "gameover-kicker", panel, "SURVIVAL · RUN OVER");
+    el("h2", "gameover-title", panel, "YOU DIED");
+    this.bestTag = el("div", "gameover-best-tag", panel, "NEW BEST");
+    const rows = el("dl", "gameover-stats", panel);
+    this.wave = this.row(rows, "WAVE REACHED");
+    this.kills = this.row(rows, "KILLS");
+    this.headshots = this.row(rows, "HEADSHOTS");
+    this.best = this.row(rows, "BEST WAVE");
+    const button = el("button", "gameover-btn", panel, "TRY AGAIN");
+    button.type = "button";
+    button.addEventListener("pointerdown", (e) => e.stopPropagation());
+    button.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onRetry();
+    });
+    el("div", "gameover-hint", panel).innerHTML = "<kbd>F9</kbd> to restart";
+  }
+
+  show(wave: number, kills: number, headshots: number): void {
+    const previous = readBestWave();
+    const best = Math.max(previous, wave);
+    if (best > previous) writeBestWave(best);
+    this.wave.setNumber(wave);
+    this.kills.setNumber(kills);
+    this.headshots.setNumber(headshots);
+    this.best.setNumber(best);
+    this.bestTag.classList.toggle("is-shown", wave > previous && wave > 0);
+    this.root.classList.add("is-shown");
+  }
+
+  hide(): void {
+    this.root.classList.remove("is-shown");
+  }
+
+  private row(parent: HTMLElement, key: string): TextField {
+    el("dt", "", parent, key);
+    return new TextField(el("dd", "", parent));
   }
 }
 
@@ -190,7 +303,31 @@ export class Hud {
   private stateCode = -1;
   private readonly stateTexts = new Map<number, string>();
 
+  private readonly healthBox: HTMLDivElement;
+  private readonly healthValue: TextField;
+  private readonly healthBar: FillBar;
+  private healthFlash = 0;
+  private readonly vignette: HTMLDivElement;
+  private vignetteLevel = 0;
+  private shownVignette = -1;
+
+  private readonly wave: TextField;
+  private waveKey = NaN;
+  private readonly banner: HTMLDivElement;
+  private readonly bannerTitle: TextField;
+  private readonly bannerSub: TextField;
+  private bannerTimer = 0;
+  private readonly pickup: TextField;
+  private pickupTimer = 0;
+  private readonly gameOver: GameOver;
+
   private readonly camMode: TextField;
+  private readonly kills: TextField;
+  private readonly headshots: TextField;
+  private killsHot = 0;
+  private headshotsHot = 0;
+  private lastKills = 0;
+  private lastHeadshots = 0;
   private readonly targets: TextField;
   private readonly barrels: TextField;
   private readonly fps: TextField;
@@ -210,11 +347,15 @@ export class Hud {
   constructor(private readonly ctx: GameContext) {
     const root = el("div", "hud hud--intro", ctx.uiRoot);
     this.root = root;
+    this.vignette = el("div", "hud-vignette", root);
+    el("div", "hud-vignette hud-vignette--low", root);
 
     const tl = el("div", "hud-tl", root);
     el("div", "hud-title", tl, "KAZZ OPS");
     const stats = el("div", "hud-stats", tl);
     this.camMode = this.statRow(stats, "CAM");
+    this.kills = this.statRow(stats, "KILLS");
+    this.headshots = this.statRow(stats, "HEADSHOTS");
     this.targets = this.statRow(stats, "TARGETS");
     this.barrels = this.statRow(stats, "BARRELS");
     this.fps = this.statRow(stats, "FPS");
@@ -229,10 +370,20 @@ export class Hud {
     const reload = el("div", "hud-reload", tr);
     this.reloadBar = new FillBar(el("div", "hud-reload-fill", reload));
 
+    this.wave = new TextField(el("div", "hud-wave", root));
     this.toast = new TextField(el("div", "hud-toast", root));
+    this.banner = el("div", "hud-banner", root);
+    this.bannerTitle = new TextField(el("div", "hud-banner-title", this.banner));
+    this.bannerSub = new TextField(el("div", "hud-banner-sub", this.banner));
 
     const bottom = el("div", "hud-bottom", root);
+    this.pickup = new TextField(el("div", "hud-pickup", bottom));
     this.stateTag = new TextField(el("div", "hud-state", bottom));
+    this.healthBox = el("div", "hud-health", bottom);
+    const healthLabel = el("div", "hud-bar-label", this.healthBox, "HEALTH ");
+    this.healthValue = new TextField(el("span", "", healthLabel));
+    const healthTrack = el("div", "hud-bar-track", this.healthBox);
+    this.healthBar = new FillBar(el("div", "hud-health-fill", healthTrack));
     this.staminaBox = el("div", "hud-stamina", bottom);
     const label = el("div", "hud-stamina-label", this.staminaBox, "STAMINA ");
     this.staminaValue = new TextField(el("span", "", label));
@@ -246,6 +397,7 @@ export class Hud {
     }
 
     this.crosshair = new Crosshair(root);
+    this.gameOver = new GameOver(ctx.uiRoot, () => ctx.input.trigger("reset"));
     this.intro = this.buildIntro(prefersTouch());
 
     const { events } = ctx;
@@ -254,9 +406,38 @@ export class Hud {
       events.on("cameraMode", ({ name }) => this.showToast(`CAMERA · ${name}`)),
       events.on("weaponSwitch", ({ weapon }) => this.showToast(weapon.name)),
       events.on("impact", ({ hit }) => {
-        if (hit.prop) this.crosshair.flash(0.7, false);
+        if (hit.prop) this.crosshair.flash(0.7);
       }),
-      events.on("targetHit", () => this.crosshair.flash(1.25, true)),
+      events.on("targetHit", () => this.crosshair.flash(1.25, "is-strong")),
+      events.on("zombieHit", ({ headshot }) =>
+        this.crosshair.flash(headshot ? 1.6 : 0.8, headshot ? "is-head" : ""),
+      ),
+      events.on("zombieKilled", ({ headshot }) =>
+        this.crosshair.flashKill(headshot),
+      ),
+      events.on("playerHurt", ({ amount }) => {
+        this.healthFlash = HEALTH_FLASH_TIME;
+        this.vignetteLevel = Math.min(
+          1,
+          this.vignetteLevel + THREE.MathUtils.clamp(amount / 30, 0.25, 0.85),
+        );
+      }),
+      events.on("playerDied", ({ wave, kills }) =>
+        this.gameOver.show(wave, kills, ctx.stats.headshots),
+      ),
+      events.on("waveStart", ({ wave, count }) =>
+        this.showBanner(`WAVE ${wave}`, `${count} INCOMING`, false),
+      ),
+      events.on("waveCleared", () =>
+        this.showBanner("WAVE CLEARED", "AMMO REFILLED", true),
+      ),
+      events.on("pickup", ({ kind }) => this.showPickup(kind)),
+      events.on("reset", () => {
+        this.gameOver.hide();
+        this.vignetteLevel = 0;
+        this.bannerTimer = 0;
+        this.banner.classList.remove("is-shown");
+      }),
     );
     window.addEventListener("resize", this.onResize);
     window.visualViewport?.addEventListener("resize", this.onResize);
@@ -268,12 +449,13 @@ export class Hud {
     this.updateCrosshair(dt, touch);
     this.updateAmmo();
     this.updateStamina();
+    this.updateHealth(dt);
+    this.updateWave();
     this.updateStats(dt);
 
-    if (this.toastTimer > 0) {
-      this.toastTimer -= dt;
-      if (this.toastTimer <= 0) this.toast.node.classList.remove("is-shown");
-    }
+    this.toastTimer = this.fade(this.toast.node, this.toastTimer, dt);
+    this.bannerTimer = this.fade(this.banner, this.bannerTimer, dt);
+    this.pickupTimer = this.fade(this.pickup.node, this.pickupTimer, dt);
   }
 
   showToast(text: string): void {
@@ -281,6 +463,15 @@ export class Hud {
     this.toast.set(text);
     this.toast.node.classList.add("is-shown");
     this.toastTimer = TOAST_HOLD;
+  }
+
+  /** Big centre banner for wave start / wave cleared. */
+  showBanner(title: string, sub: string, good: boolean): void {
+    this.bannerTitle.set(title);
+    this.bannerSub.set(sub);
+    this.banner.classList.toggle("is-good", good);
+    this.banner.classList.add("is-shown");
+    this.bannerTimer = BANNER_HOLD;
   }
 
   /** Hide the start overlay (first click / tap / key). */
@@ -299,6 +490,7 @@ export class Hud {
     window.visualViewport?.removeEventListener("resize", this.onResize);
     window.clearTimeout(this.introTimer);
     this.intro?.remove();
+    this.gameOver.root.remove();
     this.root.remove();
   }
 
@@ -311,14 +503,9 @@ export class Hud {
   private buildIntro(touch: boolean): HTMLDivElement {
     const intro = el("div", "intro", this.ctx.uiRoot);
     const panel = el("div", "intro-panel", intro);
-    el("div", "intro-kicker", panel, "FIRING RANGE · SANDBOX");
+    el("div", "intro-kicker", panel, "ZOMBIE SURVIVAL");
     el("h1", "intro-title", panel, "KAZZ OPS");
-    el(
-      "p",
-      "intro-tagline",
-      panel,
-      "Tactical sandbox. Shoot stuff. Watch it fall over.",
-    );
+    el("p", "intro-tagline", panel, "Survive the waves. Barrels go boom.");
     const list = el("dl", "intro-controls", panel);
     for (const [keys, action] of touch ? INTRO_TOUCH : INTRO_DESKTOP) {
       const term = el("dt", "", list);
@@ -358,6 +545,58 @@ export class Hud {
     xh.toggle("is-idle", touch && !input.aimStick);
     xh.toggle("is-blocked", !player.canFire());
     this.crosshair.update(dt);
+  }
+
+  private updateHealth(dt: number): void {
+    const { player } = this.ctx;
+    const hp = Math.ceil(player.health);
+    this.healthValue.setNumber(hp);
+    this.healthBar.set(player.health / player.maxHealth);
+    const low = hp < LOW_HEALTH && !player.dead;
+    this.healthFlash = this.tickHot(this.healthBox, this.healthFlash, dt);
+    this.healthBox.classList.toggle("is-low", low);
+    this.root.classList.toggle("hud--low-health", low);
+    this.root.classList.toggle("hud--dead", player.dead);
+
+    if (this.vignetteLevel <= 0 && this.shownVignette === 0) return;
+    this.vignetteLevel = Math.max(0, this.vignetteLevel - VIGNETTE_DECAY * dt);
+    const level = Math.round(this.vignetteLevel * 50) / 50;
+    if (level === this.shownVignette) return;
+    this.shownVignette = level;
+    this.vignette.style.opacity = String(level);
+  }
+
+  /** Top-centre wave status; the string is only rebuilt when a shown number changes. */
+  private updateWave(): void {
+    const { wave, phase, intermissionLeft, remaining } = this.ctx.zombies;
+    const active = phase === "active";
+    const seconds = Math.ceil(intermissionLeft);
+    let key: number;
+    if (active) key = wave * 100000 + remaining;
+    else if (intermissionLeft > 0) key = -(wave * 1000 + seconds) - 1;
+    else key = 0;
+    if (key === this.waveKey) return;
+    this.waveKey = key;
+    if (active) this.wave.set(`WAVE ${wave} · ${remaining} LEFT`);
+    else if (intermissionLeft > 0)
+      this.wave.set(`${wave === 0 ? "FIRST" : "NEXT"} WAVE IN ${seconds}`);
+    else this.wave.set("GET READY");
+    this.wave.node.classList.toggle("is-active", active);
+  }
+
+  private showPickup(kind: "ammo" | "health"): void {
+    this.pickup.set(kind === "ammo" ? "+AMMO" : "+HEALTH");
+    this.pickup.node.classList.toggle("is-health", kind === "health");
+    this.pickup.node.classList.add("is-shown");
+    this.pickupTimer = PICKUP_HOLD;
+  }
+
+  /** Counts a shown element's timer down and fades it out at 0; returns the remaining time. */
+  private fade(node: HTMLElement, time: number, dt: number): number {
+    if (time <= 0) return 0;
+    const left = time - dt;
+    if (left <= 0) node.classList.remove("is-shown");
+    return Math.max(0, left);
   }
 
   /** World point -> CSS px (viewport), or null when behind the camera. */
@@ -432,6 +671,8 @@ export class Hud {
   private updateStats(dt: number): void {
     const { stats, cameraRig } = this.ctx;
     this.camMode.set(cameraRig.modeName);
+    this.kills.setNumber(stats.kills);
+    this.headshots.setNumber(stats.headshots);
     this.targets.setNumber(stats.targetsDropped);
     this.barrels.setNumber(stats.barrelsExploded);
     this.fps.setNumber(stats.fps);
@@ -440,6 +681,12 @@ export class Hud {
       this.targetsHot = STAT_HOT_TIME;
     if (stats.barrelsExploded > this.lastBarrels)
       this.barrelsHot = STAT_HOT_TIME;
+    if (stats.kills > this.lastKills) this.killsHot = STAT_HOT_TIME;
+    if (stats.headshots > this.lastHeadshots) this.headshotsHot = STAT_HOT_TIME;
+    this.lastKills = stats.kills;
+    this.lastHeadshots = stats.headshots;
+    this.killsHot = this.tickHot(this.kills.node, this.killsHot, dt);
+    this.headshotsHot = this.tickHot(this.headshots.node, this.headshotsHot, dt);
     this.lastTargets = stats.targetsDropped;
     this.lastBarrels = stats.barrelsExploded;
     this.targetsHot = this.tickHot(this.targets.node, this.targetsHot, dt);

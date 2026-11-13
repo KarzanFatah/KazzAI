@@ -39,6 +39,19 @@ const KNOCK_LIFT = 2.6;
 const KNOCK_MAX = 14;
 const KNOCK_DECAY = 3.5;
 
+// Health: regen after a quiet spell; hits shove the player and shake the camera.
+const REGEN_DELAY = 6;
+const REGEN_RATE = 5;
+const HURT_PUSH = 0.16; // m/s of knockback per point of damage
+const HURT_PUSH_MAX = 4.5;
+const HURT_SHAKE = 0.012; // trauma per point of damage
+const HURT_SHAKE_MAX = 0.55;
+/** Death: the body tips over backwards and settles on the ground. */
+const DEATH_FALL_TIME = 0.6;
+const DEATH_ANGLE = Math.PI / 2 - 0.08;
+const DEATH_LIFT = 0.14;
+const DEAD_DECEL = 10;
+
 const FALL_RESET_Y = -5;
 const GROUNDED_MAX_VY = 1.5;
 const STEP_PRECHARGE = 0.5;
@@ -273,6 +286,10 @@ export class Player {
   private readonly moveVel = new THREE.Vector3();
   private readonly knock = new THREE.Vector3();
   private tactical = false;
+  /** Seconds since the last damage (drives health regen). */
+  private sinceHurt = Infinity;
+  /** Seconds since death (drives the fall animation). */
+  private deathTime = 0;
   /** Seconds since the weapon was last lowered (tactical sprint / vault). */
   private loweredTimer = Infinity;
   /** Seconds since stamina was last spent. */
@@ -319,6 +336,8 @@ export class Player {
     body.addShape(new CANNON.Sphere(RADIUS), new CANNON.Vec3(0, HEAD_SPHERE_Y, 0));
     this.body = body;
     ctx.physics.addBody(body);
+    // Yaw first, then tip around the model's own X axis when dying.
+    this.model.root.rotation.order = "YXZ";
     ctx.scene.add(this.model.root);
 
     this.offExplosion = ctx.events.on("explosion", ({ position, radius }) =>
@@ -329,6 +348,7 @@ export class Player {
   /** Can the weapon fire this frame? (false while sprinting, vaulting, or in sprint-to-fire delay) */
   canFire(): boolean {
     return (
+      !this.dead &&
       this.state !== "tactical" &&
       this.state !== "vault" &&
       this.loweredTimer >= this.ctx.tuning.sprintToFireDelay
@@ -339,7 +359,12 @@ export class Player {
   update(dt: number): void {
     if (dt <= 0) return;
     this.keepInWorld();
+    if (this.dead) {
+      this.updateDead(dt);
+      return;
+    }
     this.readMoveIntent();
+    this.updateHealth(dt);
 
     if (this.state === "vault") {
       this.stepVault(dt);
@@ -374,8 +399,18 @@ export class Player {
     }
     this.updateFootsteps(dt);
 
-    this.model.root.position.copy(this.position);
-    this.model.root.rotation.y = this.facing;
+    const root = this.model.root;
+    root.position.copy(this.position);
+    root.rotation.y = this.facing;
+    if (this.dead) {
+      this.deathTime += dt;
+      const t = Math.min(1, this.deathTime / DEATH_FALL_TIME);
+      // Accelerating fall, then a small rebound as the back hits the ground.
+      const s = Math.max(0, this.deathTime - DEATH_FALL_TIME);
+      const bounce = 0.07 * Math.sin(Math.min(s * 12, Math.PI)) * Math.exp(-6 * s);
+      root.rotation.x = -(DEATH_ANGLE * t * t - bounce);
+      root.position.y += DEATH_LIFT * t;
+    }
     this.model.update(dt, this.buildAnimState());
   }
 
@@ -383,9 +418,17 @@ export class Player {
   damage(amount: number, from: THREE.Vector3): void {
     if (this.dead || amount <= 0) return;
     this.health = Math.max(0, this.health - amount);
+    this.sinceHurt = 0;
+    this.shove(from, Math.min(HURT_PUSH_MAX, amount * HURT_PUSH));
+    this.ctx.cameraRig.addShake(Math.min(HURT_SHAKE_MAX, amount * HURT_SHAKE));
     this.ctx.events.emit("playerHurt", { amount, health: this.health, from });
     if (this.health <= 0) {
       this.dead = true;
+      this.deathTime = 0;
+      this.tactical = false;
+      this.aiming = false;
+      this.slideTime = 0;
+      this.slideProgress = 0;
       this.ctx.events.emit("playerDied", {
         wave: this.ctx.zombies.wave,
         kills: this.ctx.stats.kills,
@@ -400,6 +443,9 @@ export class Player {
   reset(spawn: THREE.Vector3, yaw: number): void {
     this.health = this.maxHealth;
     this.dead = false;
+    this.sinceHurt = Infinity;
+    this.deathTime = 0;
+    this.model.root.rotation.x = 0;
     this.spawn.copy(spawn);
     this.spawnYaw = yaw;
     const body = this.body;
@@ -440,6 +486,45 @@ export class Player {
     this.ctx.physics.removeBody(this.body);
     this.ctx.scene.remove(this.model.root);
     this.model.dispose();
+  }
+
+  /** Regenerate health after REGEN_DELAY seconds without damage. */
+  private updateHealth(dt: number): void {
+    this.sinceHurt += dt;
+    if (this.sinceHurt >= REGEN_DELAY && this.health < this.maxHealth) {
+      this.health = Math.min(this.maxHealth, this.health + REGEN_RATE * dt);
+    }
+  }
+
+  /** Dead: no input; finish a vault in progress, then slide to a stop. */
+  private updateDead(dt: number): void {
+    if (this.state === "vault") {
+      this.stepVault(dt);
+      return;
+    }
+    this.state = this.crouched ? "crouch" : "idle";
+    this.vaultProgress = 0;
+    this.syncMoveVelocity(dt);
+    this.moveVel.multiplyScalar(Math.exp(-DEAD_DECEL * dt));
+    this.body.velocity.x = this.moveVel.x + this.knock.x;
+    this.body.velocity.z = this.moveVel.z + this.knock.z;
+  }
+
+  /** Horizontal knockback away from `from` (straight back when it is on top of the player). */
+  private shove(from: THREE.Vector3, speed: number): void {
+    if (this.state === "vault" || speed <= 0) return;
+    const dx = this.position.x - from.x;
+    const dz = this.position.z - from.z;
+    const d = Math.hypot(dx, dz);
+    const kx = this.knock.x;
+    const kz = this.knock.z;
+    if (d > 1e-3) this.knock.set(kx + (dx / d) * speed, 0, kz + (dz / d) * speed);
+    else this.knock.set(kx - Math.sin(this.facing) * speed, 0, kz - Math.cos(this.facing) * speed);
+    this.knock.clampLength(0, KNOCK_MAX);
+    // Same as explosions: the body gets the change so the controller's part stays intact.
+    const v = this.body.velocity;
+    v.x += this.knock.x - kx;
+    v.z += this.knock.z - kz;
   }
 
   private canSprint(): boolean {
